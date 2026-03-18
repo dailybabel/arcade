@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SNAKE</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;
+  background:#000;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  overflow:hidden;
+  font-family:'Courier New',Courier,monospace;
+}
+/* CRT scanline overlay */
+body::before{
+  content:'';position:fixed;top:0;left:0;right:0;bottom:0;
+  background:repeating-linear-gradient(
+    0deg,transparent,transparent 2px,rgba(0,0,0,0.12) 2px,rgba(0,0,0,0.12) 4px
+  );
+  pointer-events:none;z-index:300;
+}
+/* screen vignette */
+body::after{
+  content:'';position:fixed;top:0;left:0;right:0;bottom:0;
+  background:radial-gradient(ellipse at 50% 50%,transparent 50%,rgba(0,0,0,0.75) 100%);
+  pointer-events:none;z-index:299;
+}
+#wrap{position:relative;z-index:1}
+#title{
+  text-align:center;
+  font-size:10px;letter-spacing:0.7em;text-transform:uppercase;
+  color:#1a4a1a;margin-bottom:6px;
+}
+#hud{
+  display:flex;justify-content:space-between;align-items:baseline;
+  padding:0 2px 6px;
+  font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#1a5a1a;
+}
+#hud span{color:#00ff41;font-size:13px;font-weight:bold}
+canvas{
+  display:block;cursor:none;
+  border:1px solid #00aa22;
+  box-shadow:
+    0 0 4px #00ff41,
+    0 0 16px rgba(0,255,65,0.2),
+    0 0 60px rgba(0,255,65,0.05),
+    inset 0 0 60px rgba(0,0,0,0.5);
+}
+#over{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  background:rgba(0,4,0,0.9);gap:12px;
+  animation:cfade .4s ease;z-index:10;
+}
+@keyframes cfade{from{opacity:0}to{opacity:1}}
+#over h1{
+  font-size:22px;letter-spacing:0.55em;text-transform:uppercase;
+  color:#00ff41;
+  text-shadow:0 0 8px #00ff41,0 0 24px rgba(0,255,65,0.5);
+  animation:glitch 3s infinite;
+}
+@keyframes glitch{
+  0%,88%,100%{clip-path:none;transform:none;text-shadow:0 0 8px #00ff41,0 0 24px rgba(0,255,65,0.5)}
+  90%{clip-path:polygon(0 20%,100% 20%,100% 40%,0 40%);transform:translate(-2px,0);text-shadow:-3px 0 #f00,3px 0 #00f}
+  92%{clip-path:polygon(0 60%,100% 60%,100% 80%,0 80%);transform:translate(2px,0);text-shadow:3px 0 #f00,-3px 0 #00f}
+  94%{clip-path:none;transform:none;text-shadow:0 0 8px #00ff41,0 0 24px rgba(0,255,65,0.5)}
+}
+.o-lbl{font-size:10px;color:#0a3a0a;letter-spacing:0.3em;text-transform:uppercase}
+.o-val{font-size:22px;color:#00ff41;letter-spacing:0.4em;text-shadow:0 0 6px #00ff41}
+#hs-line{font-size:10px;color:#ff9900;letter-spacing:0.3em;min-height:14px;text-shadow:0 0 8px #ff9900}
+.blink{animation:bk 1.1s step-end infinite}
+@keyframes bk{50%{opacity:0}}
+.hidden{display:none!important}
+#lvbar{height:2px;margin-bottom:4px;background:#0a200a;position:relative;overflow:hidden}
+#lvfill{height:100%;background:#00ff41;box-shadow:0 0 4px #00ff41;transition:width 0.3s ease}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="title">◈ &nbsp; S · N · A · K · E &nbsp; ◈</div>
+  <div id="lvbar"><div id="lvfill" style="width:0%"></div></div>
+  <div id="hud">
+    <div>SCR&nbsp;<span id="sc">0</span></div>
+    <div>LVL&nbsp;<span id="lv">1</span></div>
+    <div>HI&nbsp;<span id="hi">0</span></div>
+  </div>
+  <canvas id="c"></canvas>
+  <div id="over" class="hidden">
+    <h1>GAME OVER</h1>
+    <div class="o-lbl">FINAL SCORE</div>
+    <div class="o-val" id="fs">0</div>
+    <div id="hs-line"></div>
+    <div class="o-lbl blink" style="margin-top:4px">[ SPACE &nbsp;·&nbsp; CLICK &nbsp;·&nbsp; ENTER ]</div>
+  </div>
+</div>
+
+<script>
+// ─── Config ───────────────────────────────────────────────────────────────────
+const CELL = 20, COLS = 28, ROWS = 22;
+const W = COLS * CELL, H = ROWS * CELL;
+const BASE_MS = 130, MIN_MS = 55;
+const SCORE_PER_LVL = 80;
+
+// ─── Canvas setup ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+canvas.width = W; canvas.height = H;
+const ctx = canvas.getContext('2d');
+
+// ─── Audio via Web Audio API ──────────────────────────────────────────────────
+let ac;
+function initAC() {
+  if (!ac) try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+}
+function tone(freq, dur, type = 'square', vol = 0.12, delay = 0) {
+  if (!ac) return;
+  try {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, ac.currentTime + delay);
+    g.gain.setValueAtTime(0.001, ac.currentTime + delay);
+    g.gain.linearRampToValueAtTime(vol, ac.currentTime + delay + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + delay + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(ac.currentTime + delay);
+    o.stop(ac.currentTime + delay + dur + 0.01);
+  } catch(e) {}
+}
+function sfxEat()  { tone(440,0.07,'square',0.12); tone(660,0.09,'square',0.10,0.06); }
+function sfxDie()  { tone(220,0.12,'sawtooth',0.18); tone(140,0.25,'sawtooth',0.14,0.10); tone(80,0.4,'sawtooth',0.1,0.22); }
+function sfxLevel(){ tone(523,0.07,'square',0.10); tone(659,0.07,'square',0.10,0.09); tone(784,0.12,'square',0.10,0.18); }
+function sfxStart(){ tone(330,0.05,'square',0.08); tone(440,0.05,'square',0.08,0.07); tone(523,0.08,'square',0.08,0.14); }
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let snake, dir, ndir, food, particles;
+let score, hi = 0, lvl, dead, tick;
+let stepTimer, animId, flashFrames;
+
+const rnd = n => Math.floor(Math.random() * n);
+
+function getSpeed() { return Math.max(MIN_MS, BASE_MS - (lvl - 1) * 8); }
+
+// ─── Init / Restart ───────────────────────────────────────────────────────────
+function init() {
+  initAC();
+  snake = [{x:13,y:11},{x:12,y:11},{x:11,y:11}];
+  dir  = {x:1,y:0};
+  ndir = {x:1,y:0};
+  score = 0; lvl = 1; dead = false; tick = 0; flashFrames = 0;
+  particles = [];
+  placeFood();
+  refreshHUD();
+  document.getElementById('over').classList.add('hidden');
+  clearInterval(stepTimer);
+  stepTimer = setInterval(step, getSpeed());
+  cancelAnimationFrame(animId);
+  (function loop(){ draw(); animId = requestAnimationFrame(loop); })();
+  sfxStart();
+}
+
+// ─── Food placement ───────────────────────────────────────────────────────────
+function placeFood() {
+  let p;
+  do { p = {x:rnd(COLS), y:rnd(ROWS), age:0}; }
+  while (snake.some(s => s.x===p.x && s.y===p.y));
+  food = p;
+}
+
+// ─── HUD update ───────────────────────────────────────────────────────────────
+function refreshHUD() {
+  document.getElementById('sc').textContent = score;
+  document.getElementById('hi').textContent = hi;
+  document.getElementById('lv').textContent = lvl;
+  // level progress bar within current level
+  const nextThresh = lvl * SCORE_PER_LVL;
+  const prevThresh = (lvl - 1) * SCORE_PER_LVL;
+  const pct = Math.min(100, ((score - prevThresh) / SCORE_PER_LVL) * 100);
+  document.getElementById('lvfill').style.width = pct + '%';
+}
+
+// ─── Game step ────────────────────────────────────────────────────────────────
+function step() {
+  if (dead) return;
+  tick++;
+  food.age++;
+  dir = ndir;
+  const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+
+  // Collision: wall
+  if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) { endGame(); return; }
+  // Collision: self
+  if (snake.some(s => s.x===head.x && s.y===head.y)) { endGame(); return; }
+
+  snake.unshift(head);
+
+  if (head.x === food.x && head.y === food.y) {
+    const bonus = lvl;
+    score += 10 + bonus;
+    const newLvl = 1 + Math.floor(score / SCORE_PER_LVL);
+    if (newLvl > lvl) {
+      lvl = newLvl;
+      clearInterval(stepTimer);
+      stepTimer = setInterval(step, getSpeed());
+      sfxLevel();
+    } else {
+      sfxEat();
+    }
+    burst(food.x * CELL + CELL/2, food.y * CELL + CELL/2);
+    placeFood();
+    refreshHUD();
+  } else {
+    snake.pop();
+  }
+}
+
+// ─── End game ─────────────────────────────────────────────────────────────────
+function endGame() {
+  dead = true;
+  clearInterval(stepTimer);
+  flashFrames = 12;
+  sfxDie();
+  const isNew = score > hi;
+  if (isNew) hi = score;
+  refreshHUD();
+  document.getElementById('fs').textContent = score;
+  document.getElementById('hs-line').textContent = isNew && score > 0 ? '★  NEW HIGH SCORE  ★' : '';
+  // Delay overlay so death flash is visible
+  setTimeout(() => {
+    document.getElementById('over').classList.remove('hidden');
+  }, 450);
+}
+
+// ─── Particle burst ───────────────────────────────────────────────────────────
+function burst(cx, cy) {
+  for (let i = 0; i < 22; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 0.8 + Math.random() * 3.5;
+    const hue = 100 + rnd(70);
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+      life: 1, maxLife: 1,
+      r: 1.5 + Math.random() * 2,
+      col: `hsl(${hue},100%,${55+rnd(30)}%)`
+    });
+  }
+}
+
+// ─── Draw ─────────────────────────────────────────────────────────────────────
+function draw() {
+  // Background
+  ctx.fillStyle = '#030a04';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(0,60,20,0.45)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= COLS; x++) {
+    ctx.beginPath(); ctx.moveTo(x*CELL, 0); ctx.lineTo(x*CELL, H); ctx.stroke();
+  }
+  for (let y = 0; y <= ROWS; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y*CELL); ctx.lineTo(W, y*CELL); ctx.stroke();
+  }
+
+  // Death flash
+  if (flashFrames > 0) {
+    ctx.fillStyle = `rgba(255,20,20,${flashFrames/12 * 0.18})`;
+    ctx.fillRect(0, 0, W, H);
+    flashFrames--;
+  }
+
+  drawFood();
+  drawSnake();
+  drawParticles();
+}
+
+function drawFood() {
+  const fx = food.x * CELL + CELL/2;
+  const fy = food.y * CELL + CELL/2;
+  const pulse = 0.82 + Math.sin(food.age * 0.22) * 0.18;
+  const r = (CELL/2 - 2) * pulse;
+
+  ctx.save();
+  // outer glow
+  ctx.shadowColor = '#ff3333';
+  ctx.shadowBlur = 14 * pulse;
+
+  // fill circle
+  const g = ctx.createRadialGradient(fx - r*0.25, fy - r*0.25, r*0.05, fx, fy, r);
+  g.addColorStop(0, '#ff8080');
+  g.addColorStop(0.5, '#ff3333');
+  g.addColorStop(1, '#aa1111');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(fx, fy, r, 0, Math.PI*2); ctx.fill();
+
+  // shine
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(255,220,220,0.55)';
+  ctx.beginPath(); ctx.arc(fx - r*0.3, fy - r*0.3, r*0.28, 0, Math.PI*2); ctx.fill();
+
+  // tiny stem
+  ctx.strokeStyle = '#44aa44';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(fx, fy - r); ctx.lineTo(fx + 2, fy - r - 3); ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawSnake() {
+  const len = snake.length;
+  // Draw from tail to head so head renders on top
+  for (let i = len - 1; i >= 0; i--) {
+    const seg = snake[i];
+    const isHead = i === 0;
+    const t = i / (len - 1 || 1);
+    const px = seg.x * CELL, py = seg.y * CELL;
+    const pad = isHead ? 1 : 2;
+    const sw = CELL - pad*2, sh = CELL - pad*2;
+
+    ctx.save();
+    if (isHead) {
+      ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 10;
+      // Head gradient
+      const hg = ctx.createLinearGradient(px, py, px+CELL, py+CELL);
+      hg.addColorStop(0, '#44ff66');
+      hg.addColorStop(1, '#00cc33');
+      ctx.fillStyle = hg;
+    } else {
+      const green = Math.floor(220 * (1 - t*0.55) + 20);
+      ctx.fillStyle = `rgb(0,${green},${Math.floor(15*(1-t))})`;
+    }
+
+    roundRect(ctx, px+pad, py+pad, sw, sh, isHead ? 6 : 3);
+    ctx.fill();
+
+    // Body highlight stripe
+    if (!isHead && i < len * 0.7) {
+      ctx.fillStyle = `rgba(0,255,80,${0.12 * (1 - t)})`;
+      roundRect(ctx, px+pad+1, py+pad+1, sw-2, Math.min(4, sh/2), 2);
+      ctx.fill();
+    }
+
+    // Eyes on head
+    if (isHead) {
+      ctx.shadowBlur = 0;
+      const cx = px + CELL/2, cy = py + CELL/2;
+      let e1x, e1y, e2x, e2y;
+      const ofs = CELL/2 - 4;
+      const perp = 3.5;
+      if      (dir.x === 1)  { e1x=cx+ofs; e1y=cy-perp; e2x=cx+ofs; e2y=cy+perp; }
+      else if (dir.x === -1) { e1x=cx-ofs; e1y=cy-perp; e2x=cx-ofs; e2y=cy+perp; }
+      else if (dir.y === -1) { e1x=cx-perp; e1y=cy-ofs; e2x=cx+perp; e2y=cy-ofs; }
+      else                   { e1x=cx-perp; e1y=cy+ofs; e2x=cx+perp; e2y=cy+ofs; }
+
+      ctx.fillStyle = '#001a06';
+      ctx.beginPath(); ctx.arc(e1x, e1y, 2.8, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e2x, e2y, 2.8, 0, Math.PI*2); ctx.fill();
+      // glints
+      ctx.fillStyle = 'rgba(180,255,180,0.85)';
+      ctx.beginPath(); ctx.arc(e1x-0.6, e1y-0.6, 1.0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e2x-0.6, e2y-0.6, 1.0, 0, Math.PI*2); ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+function drawParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.88; p.vy *= 0.88;
+    p.life -= 0.055;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.col;
+    ctx.shadowColor = p.col; ctx.shadowBlur = 4;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ─── Rounded rect helper ──────────────────────────────────────────────────────
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+const DIRS = {
+  ArrowUp:    {x:0, y:-1}, ArrowDown:  {x:0, y:1},
+  ArrowLeft:  {x:-1,y:0},  ArrowRight: {x:1, y:0},
+  w:{x:0,y:-1}, s:{x:0,y:1}, a:{x:-1,y:0}, d:{x:1,y:0},
+  W:{x:0,y:-1}, S:{x:0,y:1}, A:{x:-1,y:0}, D:{x:1,y:0},
+};
+
+document.addEventListener('keydown', e => {
+  initAC();
+  const d = DIRS[e.key];
+  if (d) {
+    // No 180° reversal
+    if (!(d.x === -dir.x && d.y === -dir.y)) ndir = d;
+    e.preventDefault();
+    return;
+  }
+  if ((e.key === ' ' || e.key === 'Enter') && dead) init();
+  if (e.key === ' ') e.preventDefault();
+});
+
+// Touch / click restart
+document.getElementById('wrap').addEventListener('click', () => {
+  initAC();
+  if (dead) init();
+});
+
+// Swipe support
+let tx0, ty0;
+canvas.addEventListener('touchstart', e => {
+  initAC();
+  tx0 = e.touches[0].clientX;
+  ty0 = e.touches[0].clientY;
+  e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - tx0;
+  const dy = e.changedTouches[0].clientY - ty0;
+  if (Math.abs(dx) < 10 && Math.abs(dy) < 10) { if(dead) init(); return; }
+  let d;
+  if (Math.abs(dx) > Math.abs(dy)) d = dx > 0 ? {x:1,y:0} : {x:-1,y:0};
+  else                              d = dy > 0 ? {x:0,y:1} : {x:0,y:-1};
+  if (!(d.x === -dir.x && d.y === -dir.y)) ndir = d;
+  e.preventDefault();
+}, {passive:false});
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
