@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conway's Game of Life — GPU Edition</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #000208;
+  --panel-bg:   rgba(0, 8, 20, 0.93);
+  --border:     rgba(0, 210, 160, 0.22);
+  --border-hi:  rgba(0, 210, 160, 0.6);
+  --accent:     #00d2a0;
+  --accent-dim: rgba(0, 210, 160, 0.45);
+  --danger:     #ff3e22;
+  --warn:       #ffaa22;
+  --text:       #8de8cc;
+  --text-dim:   #335544;
+  --text-mid:   #558866;
+  --font:       'Courier New', 'Lucida Console', 'Consolas', monospace;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+canvas.grabbing { cursor: grabbing; }
+canvas.stamp    { cursor: none; }
+
+/* ─── PANEL ─────────────────────────────────────────────────── */
+#panel {
+  position: fixed;
+  top: 14px; left: 14px;
+  width: 216px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  user-select: none;
+  z-index: 10;
+  box-shadow: 0 0 24px rgba(0,210,160,0.06), 0 2px 16px rgba(0,0,0,0.6);
+}
+
+#panel-header {
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#panel-header:hover { background: rgba(0,210,160,0.04); }
+
+#panel-header h1 {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: normal;
+}
+#panel-chevron {
+  color: var(--text-dim);
+  font-size: 10px;
+  transition: transform 0.2s;
+}
+#panel-chevron.open { transform: rotate(180deg); }
+
+#panel-body {
+  padding: 10px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+#panel-body.hidden { display: none; }
+
+/* ─── LABELS ─────────────────────────────────────────────────── */
+.lbl {
+  font-size: 8.5px;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(0,210,160,0.07);
+  margin-bottom: 1px;
+}
+
+/* ─── BUTTONS ────────────────────────────────────────────────── */
+.row { display: flex; gap: 4px; }
+
+.btn {
+  flex: 1;
+  padding: 5px 3px 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  font-family: var(--font);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  white-space: nowrap;
+  outline: none;
+}
+.btn:hover {
+  background: rgba(0,210,160,0.09);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn.active {
+  background: rgba(0,210,160,0.14);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px rgba(0,210,160,0.15) inset;
+}
+.btn.primary { color: var(--accent); border-color: var(--accent-dim); }
+.btn.danger  { color: #ff8855; border-color: rgba(255,62,34,0.35); }
+.btn.danger:hover { background: rgba(255,62,34,0.1); border-color: var(--danger); color: var(--danger); }
+
+/* ─── SELECT ─────────────────────────────────────────────────── */
+select {
+  width: 100%;
+  background: rgba(0,12,28,0.85);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 5px 8px 4px;
+  border-radius: 2px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+select:focus { border-color: var(--accent-dim); }
+
+/* ─── SLIDER ─────────────────────────────────────────────────── */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+input[type=range] {
+  flex: 1;
+  height: 3px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  background: rgba(0,210,160,0.15);
+  border-radius: 2px;
+  outline: none;
+}
+.slider-val {
+  font-size: 9px;
+  color: var(--accent);
+  min-width: 28px;
+  text-align: right;
+  letter-spacing: 0.05em;
+}
+
+/* ─── HINTS ─────────────────────────────────────────────────── */
+.hint {
+  font-size: 8.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+}
+.hint b { color: var(--text-mid); font-weight: normal; }
+
+hr.div {
+  border: none;
+  border-top: 1px solid rgba(0,210,160,0.07);
+  margin: 1px 0;
+}
+
+/* ─── STATS ─────────────────────────────────────────────────── */
+#stats {
+  position: fixed;
+  bottom: 14px; right: 14px;
+  font-size: 9.5px;
+  color: var(--text-dim);
+  text-align: right;
+  z-index: 10;
+  line-height: 2;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+#stats .val { color: var(--accent); }
+#stats .lbl-s { color: var(--text-dim); }
+
+/* ─── TOAST ─────────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  top: 14px; left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  background: rgba(0,16,32,0.9);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 6px 18px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  border-radius: 2px;
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ─── KEYMAP OVERLAY ─────────────────────────────────────────── */
+#keymap {
+  position: fixed;
+  bottom: 14px; left: 14px;
+  font-size: 8px;
+  color: var(--text-dim);
+  line-height: 1.9;
+  letter-spacing: 0.1em;
+  z-index: 10;
+  pointer-events: none;
+}
+#keymap b { color: var(--text-mid); }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<!-- ─── CONTROL PANEL ──────────────────────────────────────────── -->
+<div id="panel">
+  <div id="panel-header">
+    <h1>Game of Life</h1>
+    <span id="panel-chevron" class="open">▲</span>
+  </div>
+  <div id="panel-body">
+
+    <div class="lbl">Simulation</div>
+    <div class="row">
+      <button class="btn primary" id="btn-play">▶ PLAY</button>
+      <button class="btn"         id="btn-step">STEP</button>
+      <button class="btn danger"  id="btn-clear">CLR</button>
+    </div>
+
+    <div class="lbl">Speed <span id="speed-val" style="color:var(--accent);float:right">10 /s</span></div>
+    <div class="slider-row">
+      <input type="range" id="speed" min="1" max="100" value="38">
+    </div>
+
+    <hr class="div">
+    <div class="lbl">Stamp Mode</div>
+    <div class="row">
+      <button class="btn" id="btn-stamp">◈ OFF</button>
+      <button class="btn" id="btn-rotate">↻ ROTATE</button>
+    </div>
+<select id="pattern-sel">
+      <optgroup label="── Spaceships ──">
+        <option value="glider">Glider</option>
+        <option value="lwss">LWSS</option>
+        <option value="mwss">MWSS</option>
+        <option value="hwss">HWSS</option>
+        <option value="copperhead">Copperhead</option>
+      </optgroup>
+      <optgroup label="── Guns ──">
+        <option value="gosper">Gosper Gun</option>
+      </optgroup>
+      <optgroup label="── Oscillators ──">
+        <option value="pulsar">Pulsar</option>
+        <option value="pentadecathlon">Pentadecathlon</option>
+        <option value="tumbler">Tumbler</option>
+        <option value="kok_galaxy">Kok's Galaxy</option>
+        <option value="queen_bee">Queen Bee Shuttle</option>
+      </optgroup>
+      <optgroup label="── Methuselahs ──">
+        <option value="r_pentomino">R-Pentomino (1103 gen)</option>
+        <option value="acorn">Acorn (5206 gen)</option>
+        <option value="diehard">Diehard (dies gen 130)</option>
+        <option value="pi_heptomino">Pi Heptomino (173 gen)</option>
+        <option value="bunnies">Bunnies (17489 gen)</option>
+        <option value="bunnies11">Bunnies 11 (17465 gen)</option>
+      </optgroup>
+    </select>
+
+    <hr class="div">
+    <div class="lbl">File I/O</div>
+    <div class="row">
+      <button class="btn" id="btn-save">SAVE</button>
+      <button class="btn" id="btn-load">LOAD</button>
+      <button class="btn" id="btn-rle">RLE</button>
+    </div>
+
+    <hr class="div">
+    <div class="hint">
+      <b>Drag</b> pan · <b>Wheel</b> zoom<br>
+      <b>Space</b> play/pause · <b>R</b> rotate
+    </div>
+  </div>
+</div>
+
+<!-- ─── STATS ──────────────────────────────────────────────────── -->
+<div id="stats">
+  <span class="lbl-s">GEN </span><span class="val" id="s-gen">0</span><br>
+  <span class="lbl-s">CELLS </span><span class="val" id="s-cells">0</span><br>
+  <span class="val" id="s-fps">0</span><span class="lbl-s"> FPS</span>
+</div>
+
+<!-- ─── KEY HINTS ──────────────────────────────────────────────── -->
+<div id="keymap">
+  <b>SPACE</b> PLAY / PAUSE<br>
+  <b>R</b>&nbsp;&nbsp;&nbsp;&nbsp; ROTATE STAMP<br>
+  <b>C</b>&nbsp;&nbsp;&nbsp;&nbsp; CLEAR
+</div>
+
+<div id="toast"></div>
+<input type="file" id="fi-load" accept=".json" style="display:none">
+<input type="file" id="fi-rle"  accept=".rle,.txt" style="display:none">
+
+<script>
+'use strict';
+
+/* ================================================================
+   COORDINATE ENCODING
+   Encode (x,y) integers as a single JS number (no string allocs).
+   Coordinate range: ±COORD_OFFSET (~1M cells per axis).
+   Max encoded value ≈ 4.4e12, well within Number.MAX_SAFE_INTEGER.
+================================================================ */
+const COORD_OFFSET = 1 << 20;  // 1 048 576
+const COORD_RANGE  = 1 << 21;  // 2 097 152
+
+function encode(x, y) {
+    return (x + COORD_OFFSET) * COORD_RANGE + (y + COORD_OFFSET);
+}
+function decodeX(k) {
+    return Math.floor(k / COORD_RANGE) - COORD_OFFSET;
+}
+function decodeY(k) {
+    return (k % COORD_RANGE) - COORD_OFFSET;
+}
+
+/* ================================================================
+   PATTERN LIBRARY
+   See: https://conwaylife.com/wiki/Main_Page
+================================================================ */
+const PATTERNS = {
+    glider: {
+        name: 'Glider',
+        cells: [[1,0],[2,1],[0,2],[1,2],[2,2]]
+    },
+    lwss: {
+        name: 'LWSS',
+        cells: [
+            [1,0],[4,0],
+            [0,1],
+            [0,2],[4,2],
+            [0,3],[1,3],[2,3],[3,3]
+        ]
+    },
+    gosper: {
+        name: 'Gosper Gun',
+        cells: [
+            [24,0],
+            [22,1],[24,1],
+            [12,2],[13,2],[20,2],[21,2],[34,2],[35,2],
+            [11,3],[15,3],[20,3],[21,3],[34,3],[35,3],
+            [0,4],[1,4],[10,4],[16,4],[20,4],[21,4],
+            [0,5],[1,5],[10,5],[14,5],[16,5],[17,5],[22,5],[24,5],
+            [10,6],[16,6],[24,6],
+            [11,7],[15,7],
+            [12,8],[13,8]
+        ]
+    },
+    pulsar: {
+        name: 'Pulsar',
+        cells: [
+            [2,0],[3,0],[4,0],[8,0],[9,0],[10,0],
+            [0,2],[5,2],[7,2],[12,2],
+            [0,3],[5,3],[7,3],[12,3],
+            [0,4],[5,4],[7,4],[12,4],
+            [2,5],[3,5],[4,5],[8,5],[9,5],[10,5],
+            [2,7],[3,7],[4,7],[8,7],[9,7],[10,7],
+            [0,8],[5,8],[7,8],[12,8],
+            [0,9],[5,9],[7,9],[12,9],
+            [0,10],[5,10],[7,10],[12,10],
+            [2,12],[3,12],[4,12],[8,12],[9,12],[10,12]
+        ]
+    },
+// ── SPACESHIPS ────────────────────────────────────────────────────
+   mwss: {
+        name: 'MWSS',
+        cells: [
+            [3,0],
+            [1,1],[5,1],
+            [0,2],
+            [0,3],[5,3],
+            [0,4],[1,4],[2,4],[3,4],[4,4]
+        ]
+    },
+    hwss: {
+        name: 'HWSS',
+        cells: [
+            [3,0],[4,0],
+            [1,1],[6,1],
+            [0,2],
+            [0,3],[6,3],
+            [0,4],[1,4],[2,4],[3,4],[4,4],[5,4]
+        ]
+    },
+    // c/10 orthogonal, period 10. Discovered by zdr, Jan 2016.
+    // https://www.conwaylife.com/wiki/Copperhead
+    copperhead: {
+        name: 'Copperhead',
+        cells: [
+            [1,0],[2,0],[5,0],[6,0],
+            [3,1],[4,1],
+            [3,2],[4,2],
+            [0,3],[2,3],[5,3],[7,3],
+            [0,4],[7,4],
+            [0,6],[7,6],
+            [1,7],[2,7],[5,7],[6,7],
+            [2,8],[3,8],[4,8],[5,8],
+            [3,10],[4,10],
+            [3,11],[4,11]
+        ]
+    },
+
+    // ── OSCILLATORS ──────────────────────────────────────────────────
+    // Period 15. The canonical oscillator form (not the 10-cell line seed).
+    pentadecathlon: {
+        name: 'Pentadecathlon',
+        cells: [
+            [2,0],[10,0],
+            [0,1],[1,1],[3,1],[4,1],[5,1],[6,1],[7,1],[8,1],[9,1],[11,1],[12,1],
+            [2,2],[10,2]
+        ]
+    },
+    // Period 14. Flips end-over-end.
+    tumbler: {
+        name: 'Tumbler',
+        cells: [
+            [1,0],[2,0],[4,0],[5,0],
+            [1,1],[2,1],[4,1],[5,1],
+            [2,2],[4,2],
+            [0,3],[2,3],[4,3],[6,3],
+            [0,4],[2,4],[4,4],[6,4],
+            [0,5],[1,5],[5,5],[6,5]
+        ]
+    },
+    // Period 8. 4-fold symmetric — looks like a pair of galactic arms.
+    kok_galaxy: {
+        name: "Kok's Galaxy",
+        cells: [
+            [0,0],[1,0],[6,0],[7,0],
+            [0,1],[2,1],[5,1],[7,1],
+            [1,2],[2,2],[4,2],[5,2],
+            [3,3],[4,3],
+            [3,4],[4,4],
+            [1,5],[2,5],[4,5],[5,5],
+            [0,6],[2,6],[5,6],[7,6],
+            [0,7],[1,7],[6,7],[7,7]
+        ]
+    },
+    // Period 30. A queen bee bounces between two stationary blocks.
+    queen_bee: {
+        name: 'Queen Bee Shuttle',
+        cells: [
+            [9,0],
+            [7,1],[9,1],
+            [6,2],[10,2],
+            [6,3],[11,3],
+            [0,4],[1,4],[6,4],[10,4],
+            [0,5],[1,5],[6,5],[11,5],
+            [6,6],[10,6],
+            [7,7],[9,7],
+            [9,8]
+        ]
+    },
+
+    // ── METHUSELAHS ──────────────────────────────────────────────────
+    // 5 cells → stabilises gen 1103
+    r_pentomino: {
+        name: 'R-Pentomino',
+        cells: [[1,0],[2,0],[0,1],[1,1],[1,2]]
+    },
+    // 7 cells → stabilises gen 5206 (~633 cells)
+    acorn: {
+        name: 'Acorn',
+        cells: [[1,0],[3,1],[0,2],[1,2],[4,2],[5,2],[6,2]]
+    },
+    // 7 cells → extinct at gen 130. Great demo.
+    diehard: {
+        name: 'Diehard',
+        cells: [[6,0],[0,1],[1,1],[1,2],[5,2],[6,2],[7,2]]
+    },
+    // 7 cells → stabilises gen 173
+    pi_heptomino: {
+        name: 'Pi Heptomino',
+        cells: [[0,0],[1,0],[2,0],[0,1],[2,1],[0,2],[2,2]]
+    },
+    // 9 cells → stabilises gen 17489 (~1744 cells). Most explosive methuselah.
+    bunnies: {
+        name: 'Bunnies',
+        cells: [
+            [0,0],[2,0],[5,0],[7,0],
+            [0,1],[5,1],
+            [1,2],[3,2],[4,2]
+        ]
+    },
+    bunnies11: {
+        name: 'Bunnies 11',
+        cells: [
+            [0,0],[2,0],[3,0],[4,0],
+            [0,1],[5,1],
+            [0,2],[2,2],[4,2],
+            [1,3],[4,3]
+        ]
+    },
+};
+function centerPattern(cells) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of cells) {
+        if (x < minX) minX = x; if (y < minY) minY = y;
+        if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+    }
+    const cx = Math.floor((minX + maxX) / 2);
+    const cy = Math.floor((minY + maxY) / 2);
+    return cells.map(([x, y]) => [x - cx, y - cy]);
+}
+
+function rotatePattern90CW(cells) {
+    // [x, y] → [y, -x]
+    return cells.map(([x, y]) => [y, -x]);
+}
+
+// Pre-center all patterns
+for (const k in PATTERNS) {
+    PATTERNS[k].cells = centerPattern(PATTERNS[k].cells);
+}
+
+/* ================================================================
+   SIMULATION STATE
+================================================================ */
+let cells = new Set();
+let generation = 0;
+let running    = false;
+
+// Incremental hash for fast cache keying.
+// XOR of per-cell hashes; XOR is commutative so order-independent.
+let stateHash = 0;
+
+function cellHash(k) {
+    // Wang 64-bit-style mix adapted for JS numbers
+    let lo = k & 0xFFFFFFFF;
+    let hi = Math.imul(Math.floor(k / 0x100000000) & 0xFFFFFFFF, 0x9e3779b9);
+    lo = Math.imul(lo ^ (lo >>> 16), 0x45d9f3b);
+    lo = Math.imul(lo ^ (lo >>> 16), 0x3a9f0d55);
+    return (lo ^ (lo >>> 16)) ^ (hi ^ (hi >>> 13));
+}
+
+function addCell(x, y) {
+    const k = encode(x, y);
+    if (!cells.has(k)) { cells.add(k); stateHash ^= cellHash(k); }
+}
+function removeCell(x, y) {
+    const k = encode(x, y);
+    if (cells.has(k)) { cells.delete(k); stateHash ^= cellHash(k); }
+}
+function toggleCell(x, y) {
+    const k = encode(x, y);
+    if (cells.has(k)) { cells.delete(k); stateHash ^= cellHash(k); }
+    else              { cells.add(k);    stateHash ^= cellHash(k); }
+}
+function clearCells() {
+    cells = new Set(); stateHash = 0; generation = 0;
+    simCache.clear(); simCacheOrder.length = 0;
+}
+
+/* ================================================================
+   MEMOIZATION / CACHE LAYER
+   Maps stateHash → {nextCells: Set, nextHash: number}
+   Probabilistic (hash collisions possible but acceptable).
+   Dramatically speeds up oscillators and still lifes.
+================================================================ */
+const CACHE_LIMIT = 64;
+const simCache      = new Map();
+const simCacheOrder = [];
+
+function cacheLookup(hash) {
+    return simCache.get(hash) || null;
+}
+function cacheStore(hash, nextCells, nextHash) {
+    if (simCache.size >= CACHE_LIMIT) {
+        simCache.delete(simCacheOrder.shift());
+    }
+    simCache.set(hash, { nextCells, nextHash });
+    simCacheOrder.push(hash);
+}
+
+/* ================================================================
+   SIMULATION STEP — O(N) sparse
+   Neighbor directions precomputed as parallel arrays (no object alloc).
+================================================================ */
+const DX = [-1,-1,-1, 0, 0, 1, 1, 1];
+const DY = [-1, 0, 1,-1, 1,-1, 0, 1];
+
+const neighborMap = new Map(); // reused across frames — no alloc in hot path
+
+function step() {
+    // Cache hit: entire next state is precomputed
+    const cached = cacheLookup(stateHash);
+    if (cached) {
+        // Copy to avoid corrupting the cached Set on user interaction
+        cells     = new Set(cached.nextCells);
+        stateHash = cached.nextHash;
+        generation++;
+        return;
+    }
+
+    neighborMap.clear();
+
+    for (const cell of cells) {
+        const cx = decodeX(cell);
+        const cy = decodeY(cell);
+        for (let d = 0; d < 8; d++) {
+            const nk = encode(cx + DX[d], cy + DY[d]);
+            const v  = neighborMap.get(nk);
+            neighborMap.set(nk, v === undefined ? 1 : v + 1);
+        }
+    }
+
+    const nextCells = new Set();
+    let   nextHash  = 0;
+
+    for (const [cell, count] of neighborMap) {
+        if (count === 3 || (count === 2 && cells.has(cell))) {
+            nextCells.add(cell);
+            nextHash ^= cellHash(cell);
+        }
+    }
+
+    cacheStore(stateHash, nextCells, nextHash);
+    cells     = nextCells;
+    stateHash = nextHash;
+    generation++;
+}
+
+/* ================================================================
+   WEBGL — CONTEXT
+================================================================ */
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', {
+    antialias:            false,
+    alpha:                false,
+    preserveDrawingBuffer: true,  // keeps trail data between frames
+    powerPreference:      'high-performance'
+});
+
+if (!gl) {
+    document.body.innerHTML =
+        '<p style="color:#f55;padding:2em;font-family:monospace">WebGL is not available in this browser.</p>';
+    throw new Error('WebGL unavailable');
+}
+
+/* ================================================================
+   SHADERS
+================================================================ */
+
+// ── Cell points (GL_POINTS) ──────────────────────────────────────
+const CELL_VERT = `
+attribute vec2  aPos;
+attribute float aAlpha;
+
+uniform vec2  uRes;
+uniform vec2  uOff;
+uniform float uScale;
+uniform float uPtSz;
+
+varying float vAlpha;
+varying float vDist;
+
+void main() {
+    vec2 screen = (aPos + uOff) * uScale;
+    vec2 clip   = (screen / uRes) * 2.0 - 1.0;
+    clip.y      = -clip.y;
+    gl_Position = vec4(clip, 0.0, 1.0);
+    gl_PointSize = uPtSz;
+    vAlpha       = aAlpha;
+}
+`;
+
+// Glow: exponential radial falloff + solid core.
+// With additive blending, overlapping cells stack → "hot" clusters.
+const CELL_FRAG = `
+precision mediump float;
+uniform vec3 uCol;
+varying float vAlpha;
+
+void main() {
+    vec2  uv   = gl_PointCoord - 0.5;
+    float d    = length(uv);
+    if (d > 0.5) discard;
+
+    float core  = 1.0 - smoothstep(0.0, 0.28, d);          // solid disc
+    float glow  = exp(-d * 7.5) * 0.55;                    // halo falloff
+    float edge  = 1.0 - smoothstep(0.38, 0.5, d);          // soft edge
+
+    float brightness = (core + glow) * edge * vAlpha;
+
+    // Hot white center grading to accent color
+    vec3 col = mix(uCol, vec3(0.85, 1.0, 0.96), core * 0.35);
+    col      = col + glow * vec3(0.0, 0.18, 0.14);
+
+    gl_FragColor = vec4(col * brightness, brightness);
+}
+`;
+
+// ── Full-screen fade quad ────────────────────────────────────────
+const FADE_VERT = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+// Draws a semi-transparent near-black quad to decay previous frames.
+// Color converges to a very dark teal → feels like deep space.
+const FADE_FRAG = `
+precision mediump float;
+uniform float uFade;
+void main() {
+    gl_FragColor = vec4(0.0, 0.004, 0.008, uFade);
+}
+`;
+
+function compileShader(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        throw new Error('Shader compile: ' + gl.getShaderInfoLog(s));
+    }
+    return s;
+}
+
+function linkProgram(vSrc, fSrc) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compileShader(gl.VERTEX_SHADER,   vSrc));
+    gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fSrc));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        throw new Error('Program link: ' + gl.getProgramInfoLog(p));
+    }
+    return p;
+}
+
+const cellProg = linkProgram(CELL_VERT, CELL_FRAG);
+const fadeProg = linkProgram(FADE_VERT, FADE_FRAG);
+
+// Uniform / attribute locations
+const CL = {
+    aPos:  gl.getAttribLocation (cellProg, 'aPos'),
+    aAlpha:gl.getAttribLocation (cellProg, 'aAlpha'),
+    uRes:  gl.getUniformLocation(cellProg, 'uRes'),
+    uOff:  gl.getUniformLocation(cellProg, 'uOff'),
+    uScale:gl.getUniformLocation(cellProg, 'uScale'),
+    uPtSz: gl.getUniformLocation(cellProg, 'uPtSz'),
+    uCol:  gl.getUniformLocation(cellProg, 'uCol'),
+};
+const FL = {
+    aPos:  gl.getAttribLocation (fadeProg, 'aPos'),
+    uFade: gl.getUniformLocation(fadeProg, 'uFade'),
+};
+
+// Buffers
+const quadBuf  = gl.createBuffer();
+const posBuf   = gl.createBuffer();
+const alphaBuf = gl.createBuffer();
+
+// Static full-screen quad in clip space
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER,
+    new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+// Typed arrays for GPU cell upload — reused every frame (no per-frame alloc)
+const MAX_VIS = 500000;
+const posArr   = new Float32Array(MAX_VIS * 2);
+const alphaArr = new Float32Array(MAX_VIS);
+
+/* ================================================================
+   VIEW TRANSFORM
+================================================================ */
+let offsetX = 0; // camera pan in world-space units
+let offsetY = 0;
+let scale   = 14; // pixels per world unit (cell width)
+
+// screen pixel → world coordinate
+function s2w(sx, sy) {
+    return [ sx / scale - offsetX,
+             sy / scale - offsetY ];
+}
+
+// world → screen pixel
+function w2s(wx, wy) {
+    return [ (wx + offsetX) * scale,
+             (wy + offsetY) * scale ];
+}
+
+// nearest cell from screen coords
+function screenToCell(sx, sy) {
+    return [ Math.round(sx / scale - offsetX),
+             Math.round(sy / scale - offsetY) ];
+}
+
+/* ================================================================
+   RENDERER
+================================================================ */
+function render() {
+    const W = canvas.width, H = canvas.height;
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+
+    // ── Pass 1: Trail fade ─────────────────────────────────────
+    // SRC_ALPHA, ONE_MINUS_SRC_ALPHA: result = src*α + dst*(1-α)
+    // With src=(0,0,0,0.07): result = dst * 0.93 (7% decay per frame)
+    gl.useProgram(fadeProg);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.vertexAttribPointer(FL.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(FL.aPos);
+    gl.uniform1f(FL.uFade, 0.20);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // ── Pass 2: Live cells (additive glow) ────────────────────
+    // SRC_ALPHA, ONE: result = src*α + dst
+    // Adjacent cells stack additively → bright clusters
+    gl.useProgram(cellProg);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.uniform2f(CL.uRes,   W, H);
+    gl.uniform2f(CL.uOff,   offsetX, offsetY);
+    gl.uniform1f(CL.uScale, scale);
+
+    const ptSz = Math.max(Math.min(scale * 0.96, 64), 1.5);
+    gl.uniform1f(CL.uPtSz, ptSz);
+
+    const liveCnt = uploadCellSet(cells, 1.0);
+    if (liveCnt > 0) {
+        gl.uniform3f(CL.uCol, 0.0, 0.82, 0.62); // teal-green
+        drawPoints(liveCnt);
+    }
+
+    // ── Pass 3: Ghost preview (stamp mode) ────────────────────
+    if (stampMode && ghostWorldCells.length > 0) {
+        const ghostCnt = uploadCellArray(ghostWorldCells, 0.32);
+        if (ghostCnt > 0) {
+            gl.uniform3f(CL.uCol, 0.65, 0.92, 1.0); // pale blue
+            drawPoints(ghostCnt);
+        }
+    }
+}
+
+// Upload cells from a Set, with viewport culling
+function uploadCellSet(cellSet, alpha) {
+    // Visible world bounds (with margin for point radius)
+    const margin = Math.max(4, ptSzWorld());
+    const minX = -offsetX - margin;
+    const maxX =  canvas.width  / scale - offsetX + margin;
+    const minY = -offsetY - margin;
+    const maxY =  canvas.height / scale - offsetY + margin;
+
+    let i = 0;
+    for (const k of cellSet) {
+        if (i >= MAX_VIS) break;
+        const wx = decodeX(k), wy = decodeY(k);
+        if (wx < minX || wx > maxX || wy < minY || wy > maxY) continue;
+        posArr[i * 2]     = wx;
+        posArr[i * 2 + 1] = wy;
+        alphaArr[i]       = alpha;
+        i++;
+    }
+    return pushToGPU(i);
+}
+
+// Upload cells from an array of [wx,wy] pairs
+function uploadCellArray(arr, alpha) {
+    const n = Math.min(arr.length, MAX_VIS);
+    for (let i = 0; i < n; i++) {
+        posArr[i * 2]     = arr[i][0];
+        posArr[i * 2 + 1] = arr[i][1];
+        alphaArr[i]       = alpha;
+    }
+    return pushToGPU(n);
+}
+
+function pushToGPU(count) {
+    if (count === 0) return 0;
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, posArr.subarray(0, count * 2), gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(CL.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(CL.aPos);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, alphaBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, alphaArr.subarray(0, count), gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(CL.aAlpha, 1, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(CL.aAlpha);
+
+    return count;
+}
+
+function drawPoints(count) { gl.drawArrays(gl.POINTS, 0, count); }
+function ptSzWorld()       { return Math.max(scale * 0.6, 2) / scale; }
+
+/* ================================================================
+   STAMP MODE
+================================================================ */
+let stampMode     = false;
+let patternKey    = 'glider';
+let patternRot    = 0;         // 0-3 (×90°)
+let ghostWorldCells = [];      // [[wx,wy], ...]
+let mouseScreenX  = 0;
+let mouseScreenY  = 0;
+
+function getRotatedCells() {
+    let c = PATTERNS[patternKey].cells.slice();
+    for (let r = 0; r < patternRot; r++) c = rotatePattern90CW(c);
+    return c;
+}
+
+function updateGhost(sx, sy) {
+    mouseScreenX = sx; mouseScreenY = sy;
+    if (!stampMode) { ghostWorldCells = []; return; }
+    const [gx, gy] = screenToCell(sx, sy);
+    ghostWorldCells = getRotatedCells().map(([dx, dy]) => [gx + dx, gy + dy]);
+}
+
+function placeStamp(sx, sy) {
+    const [gx, gy] = screenToCell(sx, sy);
+    for (const [dx, dy] of getRotatedCells()) addCell(gx + dx, gy + dy);
+}
+
+/* ================================================================
+   INPUT — MOUSE
+================================================================ */
+let isDragging  = false;
+let dragSX = 0, dragSY = 0;
+let dragOX = 0, dragOY = 0;
+let dragMoved   = false;
+const DRAG_PX   = 5;
+
+canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    isDragging = true; dragMoved = false;
+    dragSX = e.clientX; dragSY = e.clientY;
+    dragOX = offsetX;   dragOY = offsetY;
+});
+
+canvas.addEventListener('mousemove', e => {
+    updateGhost(e.clientX, e.clientY);
+    if (!isDragging) return;
+    const dx = e.clientX - dragSX;
+    const dy = e.clientY - dragSY;
+    if (!dragMoved && (Math.abs(dx) > DRAG_PX || Math.abs(dy) > DRAG_PX)) {
+        dragMoved = true;
+        canvas.classList.add('grabbing');
+    }
+    if (dragMoved) {
+        offsetX = dragOX + dx / scale;
+        offsetY = dragOY + dy / scale;
+    }
+});
+
+canvas.addEventListener('mouseup', e => {
+    if (e.button !== 0) return;
+    canvas.classList.remove('grabbing');
+    if (!dragMoved) handleClick(e.clientX, e.clientY);
+    isDragging = false;
+});
+
+canvas.addEventListener('mouseleave', () => {
+    isDragging = false;
+    dragMoved  = false;
+    ghostWorldCells = [];
+    canvas.classList.remove('grabbing');
+});
+
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.12 : (1 / 1.12);
+    // World coordinate under cursor must not move
+    const wx = e.clientX / scale - offsetX;
+    const wy = e.clientY / scale - offsetY;
+    scale = Math.max(1, Math.min(80, scale * factor));
+    offsetX = e.clientX / scale - wx;
+    offsetY = e.clientY / scale - wy;
+}, { passive: false });
+
+function handleClick(sx, sy) {
+    if (stampMode) {
+        placeStamp(sx, sy);
+    } else {
+        const [cx, cy] = screenToCell(sx, sy);
+        toggleCell(cx, cy);
+    }
+}
+
+// Touch support (basic pan/pinch)
+let lastTouchDist = 0;
+let lastTouchX = 0, lastTouchY = 0;
+let touchMoved = false;
+
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+        lastTouchX = e.touches[0].clientX;
+        lastTouchY = e.touches[0].clientY;
+        touchMoved = false;
+        dragOX = offsetX; dragOY = offsetY;
+        dragSX = lastTouchX; dragSY = lastTouchY;
+    } else if (e.touches.length === 2) {
+        lastTouchDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+        const dx = e.touches[0].clientX - dragSX;
+        const dy = e.touches[0].clientY - dragSY;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) touchMoved = true;
+        if (touchMoved) {
+            offsetX = dragOX + dx / scale;
+            offsetY = dragOY + dy / scale;
+        }
+    } else if (e.touches.length === 2) {
+        const d = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const factor = d / lastTouchDist;
+        const wx = mx / scale - offsetX;
+        const wy = my / scale - offsetY;
+        scale = Math.max(1, Math.min(80, scale * factor));
+        offsetX = mx / scale - wx;
+        offsetY = my / scale - wy;
+        lastTouchDist = d;
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    if (!touchMoved && e.changedTouches.length === 1) {
+        handleClick(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+    }
+    touchMoved = false;
+}, { passive: false });
+
+/* ================================================================
+   INPUT — KEYBOARD
+================================================================ */
+document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    switch (e.key) {
+        case ' ':
+            e.preventDefault(); togglePlay(); break;
+        case 'r': case 'R':
+            rotateStamp(); break;
+        case 'c': case 'C':
+            if (!e.ctrlKey && !e.metaKey) { clearCells(); }
+            break;
+        case 's': case 'S':
+            if (e.ctrlKey || e.metaKey) { e.preventDefault(); saveState(); }
+            break;
+    }
+});
+
+/* ================================================================
+   UI CONTROLS
+================================================================ */
+const btnPlay  = document.getElementById('btn-play');
+const btnStep  = document.getElementById('btn-step');
+const btnClear = document.getElementById('btn-clear');
+const btnStamp = document.getElementById('btn-stamp');
+const btnRot   = document.getElementById('btn-rotate');
+const speedEl  = document.getElementById('speed');
+const speedVal = document.getElementById('speed-val');
+const patSel   = document.getElementById('pattern-sel');
+
+// Speed slider → target steps/sec (exponential scale: 1..1000)
+function sliderToTPS(v) {
+    return Math.round(Math.pow(10, (v - 1) / 40.9));
+}
+let targetTPS = sliderToTPS(parseInt(speedEl.value));
+
+speedEl.addEventListener('input', () => {
+    targetTPS = sliderToTPS(parseInt(speedEl.value));
+    const label = targetTPS >= 1000 ? '1000/s' : targetTPS + '/s';
+    speedVal.textContent = label;
+});
+speedVal.textContent = targetTPS + '/s';
+
+function togglePlay() {
+    running = !running;
+    btnPlay.textContent = running ? '⏸ PAUSE' : '▶ PLAY';
+    btnPlay.classList.toggle('active', running);
+}
+
+function rotateStamp() {
+    patternRot = (patternRot + 1) % 4;
+    updateGhost(mouseScreenX, mouseScreenY);
+    toast('Rotated ' + (patternRot * 90) + '°');
+}
+
+btnPlay .addEventListener('click', togglePlay);
+btnStep .addEventListener('click', () => { if (!running) { step(); } });
+btnClear.addEventListener('click', () => { clearCells(); toast('Cleared'); });
+
+btnStamp.addEventListener('click', () => {
+    stampMode = !stampMode;
+    btnStamp.textContent = stampMode ? '◈ ON' : '◈ OFF';
+    btnStamp.classList.toggle('active', stampMode);
+    canvas.classList.toggle('stamp', stampMode);
+    if (!stampMode) ghostWorldCells = [];
+});
+
+btnRot.addEventListener('click', rotateStamp);
+
+patSel.addEventListener('change', () => {
+    patternKey = patSel.value;
+    patternRot = 0;
+    updateGhost(mouseScreenX, mouseScreenY);
+});
+
+// Panel collapse
+const panelBody    = document.getElementById('panel-body');
+const panelChevron = document.getElementById('panel-chevron');
+document.getElementById('panel-header').addEventListener('click', () => {
+    const collapsed = panelBody.classList.toggle('hidden');
+    panelChevron.classList.toggle('open', !collapsed);
+});
+
+/* ================================================================
+   FILE I/O — SAVE / LOAD
+================================================================ */
+document.getElementById('btn-save').addEventListener('click', saveState);
+document.getElementById('btn-load').addEventListener('click', () =>
+    document.getElementById('fi-load').click());
+document.getElementById('btn-rle') .addEventListener('click', () =>
+    document.getElementById('fi-rle').click());
+
+function saveState() {
+    const payload = {
+        version: 1,
+        generation,
+        view: { offsetX, offsetY, scale },
+        cells: []
+    };
+    for (const k of cells) payload.cells.push([decodeX(k), decodeY(k)]);
+
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `life-g${generation}-${cells.size}c.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Saved — ' + cells.size + ' cells');
+}
+
+document.getElementById('fi-load').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => {
+        try {
+            const d = JSON.parse(ev.target.result);
+            clearCells();
+            generation = d.generation || 0;
+            if (d.view) { offsetX = d.view.offsetX; offsetY = d.view.offsetY; scale = d.view.scale; }
+            for (const [x, y] of d.cells) addCell(x, y);
+            toast('Loaded — gen ' + generation + ', ' + cells.size + ' cells');
+        } catch (err) { toast('Load error: ' + err.message); }
+    };
+    r.readAsText(f);
+    e.target.value = '';
+});
+
+/* ================================================================
+   RLE PARSER (LifeWiki .rle format)
+   Spec: 'b'=dead 'o'=alive '$'=new-row '!'=end
+         comment lines start with '#'
+         optional run-length prefix integers
+================================================================ */
+function parseRLE(input) {
+    const result = [];
+    // Strip comments
+    const noComments = input.split('\n')
+        .filter(l => !l.startsWith('#'))
+        .join('\n');
+
+    // Skip header line(s) beginning with "x ="
+    const headerEnd = noComments.search(/[bo$!]/);
+    const data = noComments.slice(headerEnd).replace(/\s/g, '');
+
+    let x = 0, y = 0, num = '';
+
+    for (let i = 0; i < data.length; i++) {
+        const ch = data[i];
+        if (ch >= '0' && ch <= '9') { num += ch; continue; }
+
+        const count = num === '' ? 1 : parseInt(num, 10);
+        num = '';
+
+        if (ch === 'o') {
+            for (let j = 0; j < count; j++) result.push([x++, y]);
+        } else if (ch === 'b') {
+            x += count;
+        } else if (ch === '$') {
+            y += count; x = 0;
+        } else if (ch === '!') {
+            break;
+        }
+    }
+    return result;
+}
+
+document.getElementById('fi-rle').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => {
+        try {
+            const imported = parseRLE(ev.target.result);
+            // Center at current viewport center
+            const [cx, cy] = screenToCell(canvas.width / 2, canvas.height / 2);
+            // Find bounding box of imported pattern
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const [x, y] of imported) {
+                if (x < minX) minX = x; if (y < minY) minY = y;
+                if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+            }
+            const px = Math.floor((minX + maxX) / 2);
+            const py = Math.floor((minY + maxY) / 2);
+            for (const [x, y] of imported) addCell(cx + x - px, cy + y - py);
+            toast('RLE — ' + imported.length + ' cells placed');
+        } catch (err) { toast('RLE error: ' + err.message); }
+    };
+    r.readAsText(f);
+    e.target.value = '';
+});
+
+/* ================================================================
+   TOAST
+================================================================ */
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+}
+
+/* ================================================================
+   STATS
+================================================================ */
+const sGen   = document.getElementById('s-gen');
+const sCells = document.getElementById('s-cells');
+const sFPS   = document.getElementById('s-fps');
+let frameCnt = 0, lastFPSt = 0, displayFPS = 0;
+
+function updateStats(ts) {
+    sGen.textContent   = generation;
+    sCells.textContent = cells.size.toLocaleString();
+    frameCnt++;
+    if (ts - lastFPSt > 600) {
+        displayFPS = Math.round(frameCnt * 1000 / (ts - lastFPSt));
+        frameCnt = 0; lastFPSt = ts;
+    }
+    sFPS.textContent = displayFPS;
+}
+
+/* ================================================================
+   CANVAS RESIZE
+================================================================ */
+function resize() {
+    const W = window.innerWidth, H = window.innerHeight;
+    if (canvas.width !== W || canvas.height !== H) {
+        // Re-center offset so view stays stable
+        const prevW = canvas.width  || W;
+        const prevH = canvas.height || H;
+        offsetX += (W - prevW) / (2 * scale);
+        offsetY += (H - prevH) / (2 * scale);
+        canvas.width  = W;
+        canvas.height = H;
+        // After resize the GL surface is reset — re-clear to black
+        gl.clearColor(0, 0, 0.01, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+}
+window.addEventListener('resize', resize);
+
+/* ================================================================
+   INITIAL SEED
+================================================================ */
+function seedGosperGun(cx, cy) {
+    for (const [dx, dy] of PATTERNS.gosper.cells) addCell(cx + dx, cy + dy);
+}
+
+function seedRandomSoup(cx, cy, w, h, density) {
+    for (let dy = -h/2; dy < h/2; dy++) {
+        for (let dx = -w/2; dx < w/2; dx++) {
+            if (Math.random() < density) addCell(cx + dx, cy + dy);
+        }
+    }
+}
+
+/* ================================================================
+   MAIN LOOP
+================================================================ */
+let lastSimTime = 0;
+
+function loop(ts) {
+    resize();
+
+    // Simulation steps
+    if (running) {
+        const elapsed  = ts - lastSimTime;
+        const period   = 1000 / targetTPS;
+        let   toStep   = Math.floor(elapsed / period);
+        if (toStep > 0) {
+            toStep = Math.min(toStep, 20); // cap steps per frame
+            for (let i = 0; i < toStep; i++) step();
+            lastSimTime = ts - (elapsed % period);
+        }
+    } else if (!running) {
+        lastSimTime = ts;
+    }
+
+    render();
+    updateStats(ts);
+    requestAnimationFrame(loop);
+}
+
+/* ================================================================
+   BOOTSTRAP
+================================================================ */
+(function init() {
+    resize();
+
+    // Center view on world origin
+    offsetX = canvas.width  / (2 * scale);
+    offsetY = canvas.height / (2 * scale);
+
+    // Initial clear to deep space black
+    gl.clearColor(0, 0, 0.012, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Seed with Gosper Gun + a random soup beside it for immediate action
+    seedGosperGun(-20, -5);
+    seedRandomSoup(60, 0, 30, 30, 0.35);
+    seedRandomSoup(-60, 20, 20, 20, 0.40);
+
+    lastFPSt = performance.now();
+    requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
