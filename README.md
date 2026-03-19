@@ -8,6 +8,7 @@ all our games
 | Game | Play |
 |------|------|
 | Conway's Game Of Life | [▶ Play](https://dailybabel.github.io/arcade/conways-gol.html) |
+| rk tutor chatgpt | [▶ Play](https://dailybabel.github.io/arcade/rk_tutor_chatgpt.html) |
 | Asteroid Mining | [▶ Play](https://dailybabel.github.io/arcade/AsteroidMining.html) |
 | Snake | [▶ Play](https://dailybabel.github.io/arcade/snake.html) |
 
