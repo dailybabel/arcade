@@ -361,8 +361,8 @@ const SPERMS = {
 const MDEF = {
   'U':  {ax:'Y',ly: 1,dr: 1}, "U'": {ax:'Y',ly: 1,dr:-1}, 'U2': {ax:'Y',ly: 1,dr: 2},
   'D':  {ax:'Y',ly:-1,dr:-1}, "D'": {ax:'Y',ly:-1,dr: 1}, 'D2': {ax:'Y',ly:-1,dr: 2},
-  'R':  {ax:'X',ly: 1,dr: 1}, "R'": {ax:'X',ly: 1,dr:-1}, 'R2': {ax:'X',ly: 1,dr: 2},
-  'L':  {ax:'X',ly:-1,dr:-1}, "L'": {ax:'X',ly:-1,dr: 1}, 'L2': {ax:'X',ly:-1,dr: 2},
+  'R':  {ax:'X',ly: 1,dr:-1}, "R'": {ax:'X',ly: 1,dr: 1}, 'R2': {ax:'X',ly: 1,dr: 2},
+  'L':  {ax:'X',ly:-1,dr: 1}, "L'": {ax:'X',ly:-1,dr:-1}, 'L2': {ax:'X',ly:-1,dr: 2},
   'F':  {ax:'Z',ly: 1,dr:-1}, "F'": {ax:'Z',ly: 1,dr: 1}, 'F2': {ax:'Z',ly: 1,dr: 2},
   'B':  {ax:'Z',ly:-1,dr: 1}, "B'": {ax:'Z',ly:-1,dr:-1}, 'B2': {ax:'Z',ly:-1,dr: 2},
 };
@@ -739,6 +739,36 @@ class CubeRenderer {
   rebuild() {
     this._buildAll();
   }
+
+  // Returns a mapping from viewer-relative face names (F/U/R/L/D/B) to
+  // world-axis move keys. "F" = face whose normal best aligns with direction
+  // FROM cube center TO camera.
+  getViewFaceMap() {
+    this.cam.updateMatrixWorld();
+    const e = this.cam.matrixWorld.elements;
+    const camRight = {x:e[0],  y:e[1],  z:e[2]};
+    const camUp    = {x:e[4],  y:e[5],  z:e[6]};
+    const dot = (n, v) => n[0]*v.x + n[1]*v.y + n[2]*v.z;
+    const cp = this.cam.position;
+    const cl = Math.hypot(cp.x, cp.y, cp.z) || 1;
+    const camPosN = {x:cp.x/cl, y:cp.y/cl, z:cp.z/cl};
+    const faces = [
+      {n:[1,0,0],key:'R'},{n:[-1,0,0],key:'L'},
+      {n:[0,1,0],key:'U'},{n:[0,-1,0],key:'D'},
+      {n:[0,0,1],key:'F'},{n:[0,0,-1],key:'B'},
+    ];
+    let fFront = faces[0];
+    faces.forEach(f => { if(dot(f.n,camPosN) > dot(fFront.n,camPosN)) fFront=f; });
+    const fBack = faces.find(f => f.n[0]===-fFront.n[0]&&f.n[1]===-fFront.n[1]&&f.n[2]===-fFront.n[2]);
+    const rem = faces.filter(f => f!==fFront && f!==fBack);
+    let fUp = rem[0];
+    rem.forEach(f => { if(dot(f.n,camUp) > dot(fUp.n,camUp)) fUp=f; });
+    const fDown = rem.find(f => f.n[0]===-fUp.n[0]&&f.n[1]===-fUp.n[1]&&f.n[2]===-fUp.n[2]);
+    const rem2 = rem.filter(f => f!==fUp && f!==fDown);
+    const fRight = dot(rem2[0].n,camRight) >= dot(rem2[1].n,camRight) ? rem2[0] : rem2[1];
+    const fLeft  = fRight===rem2[0] ? rem2[1] : rem2[0];
+    return {F:fFront.key,B:fBack.key,U:fUp.key,D:fDown.key,R:fRight.key,L:fLeft.key};
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -848,9 +878,38 @@ class App {
   _userMove(mv) {
     if (this.queue.busy) return;
     this.redo=[];
-    this.history.push(mv);
-    this.queue.push(mv);
+    const worldMv = this._resolveMove(mv);
+    const entry = {world: worldMv, label: this._getColorLabel(worldMv)};
+    this.history.push(entry);
+    this.queue.push(worldMv);
     this._updateHistory();
+  }
+
+  // Resolve a viewer-relative move label (e.g. "F'") to the actual world move
+  // key based on current camera orientation (e.g. "R'").
+  _resolveMove(mv) {
+    const base = mv[0];               // 'F', 'R', 'U', etc.
+    const suffix = mv.slice(1);       // '', "'", '2'
+    const map = this.renderer.getViewFaceMap();
+    const worldBase = map[base] || base;
+    return worldBase + suffix;
+  }
+
+  // Get a color-coded history label for a world move.
+  // Uses the fixed center-cubie color so the label is unambiguous even after
+  // camera rotation.  E.g. R-face (Red) CW → "R", prime → "R'", double → "R2".
+  // Face color initials: R=Red, O=Orange, W=White, Y=Yellow, G=Green, Bl=Blue
+  _getColorLabel(worldMove) {
+    const base = worldMove.replace("'","").replace("2","");
+    const suffix = worldMove.slice(base.length);
+    const FACE_IDX = {R:0,L:1,U:2,D:3,F:4,B:5};
+    const idx = FACE_IDX[base];
+    if (idx === undefined) return worldMove;
+    const COLOR_LABEL = {
+      [C.RED]:'R',[C.ORANGE]:'O',[C.WHITE]:'W',
+      [C.YELLOW]:'Y',[C.GREEN]:'G',[C.BLUE]:'Bl',
+    };
+    return (COLOR_LABEL[FACE_COLOR[idx]] || base) + suffix;
   }
 
   _onMove(mv) {
@@ -903,12 +962,13 @@ class App {
 
   undo() {
     if(this.history.length===0||this.queue.busy) return;
-    const mv = this.history.pop();
-    this.redo.push(mv);
+    const entry = this.history.pop();
+    this.redo.push(entry);
+    const inv = INV[entry.world];
     // Apply inverse directly (no history push for undo)
-    this.renderer.animateMove(INV[mv], this.queue.ms, ()=>{
-      this.engine.applyMove(INV[mv]);
-      this._onMove(INV[mv]);
+    this.renderer.animateMove(inv, this.queue.ms, ()=>{
+      this.engine.applyMove(inv);
+      this._onMove(inv);
       this.queue.running=false;
       this.queue._run();
     });
@@ -918,16 +978,16 @@ class App {
 
   doRedo() {
     if(this.redo.length===0||this.queue.busy) return;
-    const mv = this.redo.pop();
-    this.history.push(mv);
-    this.queue.push(mv);
+    const entry = this.redo.pop();
+    this.history.push(entry);
+    this.queue.push(entry.world);
     this._updateHistory();
   }
 
   playRule() {
     if(this.queue.busy) return;
     const rule = RULES[this.ruleIdx];
-    rule.moves.forEach(m=>this.history.push(m));
+    rule.moves.forEach(m=>this.history.push({world:m, label:this._getColorLabel(m)}));
     this.redo=[];
     this.queue.pushAll([...rule.moves]);
     this._updateHistory();
@@ -961,7 +1021,7 @@ class App {
     if(!this.stepMode||this.stepI>=this.stepMvs.length||this.queue.busy) return;
     const mv=this.stepMvs[this.stepI];
     this.stepI++;
-    this.history.push(mv);
+    this.history.push({world:mv, label:this._getColorLabel(mv)});
     this.redo=[];
     this.queue.push(mv);
     this._updateHistory();
@@ -1037,7 +1097,8 @@ class App {
     const el=document.getElementById('history');
     const recent=this.history.slice(-30);
     if(recent.length===0){el.textContent='—';return;}
-    el.innerHTML=recent.map(m=>{
+    el.innerHTML=recent.map(e=>{
+      const m = (typeof e === 'object') ? e.label : e;
       let s='color:var(--text)';
       if(m.includes("'")) s='color:var(--gold)';
       else if(m.includes('2')) s='color:var(--purple)';
