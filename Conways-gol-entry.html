@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conway's Game Of Life — One Shot Games</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Michroma&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #080c10;
+  --surface: #0d1117;
+  --surface2: #111820;
+  --amber: #ffb800;
+  --amber-dim: #a07500;
+  --amber-glow: rgba(255,184,0,0.12);
+  --green: #39ff14;
+  --green-glow: rgba(57,255,20,0.1);
+  --cyan: #00e5ff;
+  --cyan-glow: rgba(0,229,255,0.1);
+  --magenta: #ff00aa;
+  --text: #c8d8e8;
+  --text-dim: #55687a;
+}
+
+* { box-sizing: border-box; margin:0; padding:0; }
+
+body {
+  font-family: 'Share Tech Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
+  padding: 32px;
+  overflow-x: hidden;
+}
+
+body::before {
+  content:"";
+  position:fixed; inset:0;
+  background: repeating-linear-gradient(0deg, transparent 2px, rgba(0,0,0,0.25) 4px);
+  opacity:.35;
+  pointer-events:none;
+  z-index:9999;
+}
+
+body::after {
+  content:"";
+  position:fixed; inset:0;
+  background: radial-gradient(circle at center, transparent 60%, rgba(0,0,0,0.7));
+  pointer-events:none;
+  z-index:9998;
+}
+
+.grid-bg {
+  position:fixed; inset:0;
+  background-image: linear-gradient(var(--cyan) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--cyan) 1px, transparent 1px);
+  background-size:48px 48px;
+  opacity:0.03;
+  animation: drift 28s linear infinite;
+  z-index:-1;
+}
+
+@keyframes drift {
+  from { background-position:0 0; }
+  to { background-position:48px 48px; }
+}
+
+.fade-in {
+  opacity:0;
+  transform:translateY(16px);
+  animation:fadeIn .5s ease forwards;
+}
+
+@keyframes fadeIn {
+  to { opacity:1; transform:translateY(0); }
+}
+
+h1 {
+  font-family:'Orbitron';
+  font-weight:900;
+  color:var(--cyan);
+  font-size:42px;
+}
+
+.breadcrumb {
+  color:var(--text-dim);
+  margin-bottom:16px;
+}
+
+.breadcrumb span:last-child { color:var(--cyan); }
+
+.meta {
+  margin-top:8px;
+  color:var(--text-dim);
+  font-size:12px;
+  letter-spacing:1px;
+}
+
+hr {
+  border:none;
+  height:1px;
+  background:linear-gradient(to right,var(--cyan),transparent);
+  margin:16px 0 32px;
+}
+
+.grid2 {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+
+@media(max-width:700px){ .grid2{ grid-template-columns:1fr; } }
+
+.card {
+  background:var(--surface);
+  padding:20px;
+  position:relative;
+  clip-path:polygon(0 0,calc(100% - 20px) 0,100% 20px,100% 100%,20px 100%,0 calc(100% - 20px));
+  border:1px solid rgba(255,255,255,0.05);
+  transition:.2s;
+}
+
+.card:hover {
+  transform:translateY(-3px);
+  box-shadow:0 0 12px var(--cyan-glow);
+}
+
+.card::after {
+  content:"";
+  position:absolute;
+  top:0; right:0;
+  width:0;height:0;
+  border-left:20px solid transparent;
+  border-bottom:20px solid var(--surface2);
+}
+
+.button-title {
+  font-family:'Orbitron';
+  color:var(--cyan);
+  font-size:18px;
+}
+
+.button-desc {
+  color:var(--text-dim);
+  font-size:12px;
+  margin-top:6px;
+}
+
+.data-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  margin-top:32px;
+}
+
+.data-cell {
+  background:var(--surface2);
+  padding:16px;
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%);
+}
+
+.data-label {
+  font-size:11px;
+  color:var(--text-dim);
+}
+
+.data-value {
+  font-family:'Orbitron';
+  color:var(--cyan);
+  margin-top:4px;
+}
+
+.badge {
+  margin-top:24px;
+  display:inline-block;
+  padding:10px 14px;
+  border:1px solid var(--amber);
+  color:var(--amber);
+  animation:glow 3s ease-in-out infinite;
+}
+
+@keyframes glow {
+  50% { box-shadow:0 0 12px var(--amber-glow); }
+}
+
+.prompt {
+  margin-top:32px;
+  background:var(--surface);
+  padding:16px;
+  font-size:12px;
+  white-space:pre-wrap;
+  position:relative;
+}
+
+.copy-btn {
+  position:absolute;
+  bottom:10px;
+  right:10px;
+  cursor:pointer;
+  color:var(--cyan);
+}
+
+footer {
+  margin-top:40px;
+  border-top:1px solid var(--text-dim);
+  padding-top:16px;
+  display:flex;
+  justify-content:space-between;
+  font-size:12px;
+}
+
+.cursor {
+  animation:blink 1.2s step-end infinite;
+}
+
+@keyframes blink { 50% { opacity:0; } }
+
+</style>
+
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<div class="fade-in" style="animation-delay:.05s">
+<div class="breadcrumb">ARCADE / CONTEST / <span>Conway's Game Of Life</span></div>
+
+<div>// Contest Entry — One Shot Games</div>
+<h1>Conway's Game Of Life</h1>
+<div class="meta">DailyBabel · Claude Sonnet 4.5 · 2026-03-19</div>
+<hr>
+</div>
+
+<div class="grid2 fade-in" style="animation-delay:.12s">
+<a href="https://dailybabel.github.io/arcade/conways-gol.html" class="card">
+<div class="button-title">🦠 PLAY GAME</div>
+<div class="button-desc">Launch the one-shot entry. No saves. No mercy.</div>
+</a>
+
+<a href="https://raw.githubusercontent.com/dailybabel/arcade/refs/heads/main/GameOfLife.html" target="_blank" class="card">
+<div class="button-title">📄 VIEW RAW HTML</div>
+<div class="button-desc">Inspect the full output. Uncut. Unedited. (Allegedly.)</div>
+</a>
+</div>
+
+<div class="data-grid fade-in" style="animation-delay:.19s">
+<div class="data-cell">
+<div class="data-label">GAME TITLE</div>
+<div class="data-value">Conway's Game Of Life</div>
+</div>
+<div class="data-cell">
+<div class="data-label">MODEL USED</div>
+<div class="data-value">Claude Sonnet 4.5</div>
+</div>
+<div class="data-cell">
+<div class="data-label">GENRE</div>
+<div class="data-value">Simulator</div>
+</div>
+<div class="data-cell">
+<div class="data-label">PROMPT WORD COUNT</div>
+<div class="data-value">???</div>
+</div>
+</div>
+
+<div class="badge fade-in" style="animation-delay:.26s">
+● ONE-SHOT SUBMISSION — PROMPT → OUTPUT, NO EDITS
+</div>
+
+<div class="prompt fade-in" style="animation-delay:.33s" id="prompt">
+Create a complete, production-quality implementation of Conway’s Game of Life as a SINGLE self-contained HTML file (no external dependencies, suitable for GitHub Pages).
+This is a high-performance, competition-grade build. The result must be visually impressive, technically optimized, and fully interactive.
+...
+</div>
+
+<div class="copy-btn" onclick="copyPrompt()">[ COPY PROMPT ]</div>
+
+<footer>
+<div>ONE SHOT GAMES — CONTEST ENTRY<span class="cursor">█</span></div>
+<div><a href="https://dailybabel.github.io/arcade/conways-gol.html">← BACK TO ARCADE</a> · <a href="https://github.com/dailybabel/arcade">GITHUB</a></div>
+</footer>
+
+<script>
+function copyPrompt(){
+  const text = document.getElementById("prompt").innerText;
+  navigator.clipboard.writeText(text);
+}
+</script>
+
+</body>
+</html>
