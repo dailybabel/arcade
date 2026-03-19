@@ -10,5 +10,6 @@ all our games
 | Snake | [▶ Play](https://dailybabel.github.io/arcade/snake.html) |
 | Space Invaders | [▶ Play](https://dailybabel.github.io/arcade/SpaceInvaders.html) |
 | Asteroid Mining | [▶ Play](https://dailybabel.github.io/arcade/AsteroidMining.html) |
+| Conway's Game Of Life | [▶ Play](https://dailybabel.github.io/arcade/GameOfLife.html) |
 
 ## https://dailybabel.github.io/arcade/snake.html
