@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Game of Life — Extreme+ FX</title>
+<title>Game of Life — Extreme Final</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body { margin:0; background:#05070a; overflow:hidden; color:#ddd; font-family:sans-serif;}
+body { margin:0; background:#05070a; color:#ddd; font-family:sans-serif; overflow:hidden;}
 canvas { display:block; }
 
 .ui {
@@ -13,6 +13,7 @@ canvas { display:block; }
     background:rgba(20,25,32,.9);
     padding:10px; border-radius:10px;
 }
+
 button, select, input {
     margin:2px; padding:5px;
     background:#1f2a36; color:#ddd;
@@ -41,7 +42,7 @@ button, select, input {
 
 <script>
 // =====================
-// WebGL Setup
+// Canvas / WebGL
 // =====================
 const canvas = document.getElementById("gl");
 const gl = canvas.getContext("webgl");
@@ -55,7 +56,7 @@ addEventListener("resize", resize);
 resize();
 
 // =====================
-// Shaders (Glow + Trails)
+// Shaders (fixed resolution bug)
 // =====================
 const vs = `
 attribute vec2 a;
@@ -67,20 +68,17 @@ void main(){
     vec2 p = a * u_scale + u_offset;
     vec2 clip = (p / u_resolution) * 2.0 - 1.0;
     gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
-    gl_PointSize = u_scale * 1.2;
+    gl_PointSize = u_scale;
 }`;
 
 const fs = `
 precision mediump float;
 void main(){
-    float d = length(gl_PointCoord - vec2(0.5));
-    float alpha = smoothstep(0.5, 0.0, d);
-    vec3 col = vec3(0.0,1.0,0.7) * alpha;
-    gl_FragColor = vec4(col, alpha);
+    gl_FragColor = vec4(0.0, 1.0, 0.7, 1.0);
 }`;
 
 function compile(type,src){
-    let s=gl.createShader(type);
+    const s = gl.createShader(type);
     gl.shaderSource(s,src);
     gl.compileShader(s);
     return s;
@@ -121,179 +119,167 @@ let cache = new Map();
 const patterns = {
     Glider: [[0,0],[1,0],[2,0],[2,1],[1,2]],
     LWSS: [[0,1],[0,3],[1,0],[2,0],[3,0],[4,0],[4,3],[1,4],[4,4]],
-        "Pulsar": [
+    Pulsar: [
         [-6,-4],[-6,-3],[-6,-2],[-6,2],[-6,3],[-6,4],
-        [-1,-4],[-1,-3],[-1,-2],[-1,2],[-1,3],[-1,4],
-        [-4,-6],[-3,-6],[-2,-6],[2,-6],[3,-6],[4,-6],
-        [-4,-1],[-3,-1],[-2,-1],[2,-1],[3,-1],[4,-1],
-        [-4,1],[-3,1],[-2,1],[2,1],[3,1],[4,1],
-        [-4,6],[-3,6],[-2,6],[2,6],[3,6],[4,6],
-        [1,-4],[1,-3],[1,-2],[1,2],[1,3],[1,4],
-        [6,-4],[6,-3],[6,-2],[6,2],[6,3],[6,4]
-    ],
-    "Glider Gun": [
-        [0,4],[1,4],[0,5],[1,5],
-        [10,4],[10,5],[10,6],
-        [11,3],[11,7],
-        [12,2],[12,8],
-        [13,2],[13,8],
-        [14,5],
-        [15,3],[15,7],
-        [16,4],[16,5],[16,6],
-        [17,5],
-        [20,2],[20,3],[20,4],
-        [21,2],[21,3],[21,4],
-        [22,1],[22,5],
-        [24,0],[24,1],[24,5],[24,6],
-        [34,2],[34,3],[35,2],[35,3]
+        [-1,-4],[-1,-3],[-1,-2],[-1,2],[-1,3],[-1,4]
     ]
 };
 
 const patternSelect = document.getElementById("pattern");
-for (let p in patterns){
-    let o=document.createElement("option");
-    o.value=p; o.textContent=p;
+for (let name in patterns){
+    let o = document.createElement("option");
+    o.value = name;
+    o.textContent = name;
     patternSelect.appendChild(o);
 }
 
-let currentPattern="Glider";
-patternSelect.onchange=()=>currentPattern=patternSelect.value;
+let currentPattern = "Glider";
+patternSelect.onchange = ()=> currentPattern = patternSelect.value;
 
 // =====================
-// Stamp + Rotation
+// Stamp Mode
 // =====================
-let stampMode=false;
-let rotation=0;
+let stampMode = false;
+const stampBtn = document.getElementById("stampBtn");
 
-stampBtn.onclick=()=>{
-    stampMode=!stampMode;
-    stampBtn.textContent="Stamp: "+(stampMode?"ON":"OFF");
+stampBtn.onclick = ()=>{
+    stampMode = !stampMode;
+    stampBtn.textContent = "Stamp: " + (stampMode ? "ON" : "OFF");
 };
 
-addEventListener("keydown", e=>{
-    if(e.key==="r"){
-        rotation=(rotation+1)%4;
-    }
-});
-
-function rotate([x,y]){
-    if(rotation===0) return [x,y];
-    if(rotation===1) return [-y,x];
-    if(rotation===2) return [-x,-y];
-    return [y,-x];
-}
-
 // =====================
-// Simulation
+// Simulation (cached sparse)
 // =====================
 function hash(){
     let h=0;
-    for(let k of live) h=((h<<5)-h)^k;
+    for(let k of live) h = ((h<<5)-h) ^ k;
     return h;
 }
 
 function step(){
-    let key=hash();
+    const key = hash();
     if(cache.has(key)){
-        live=new Set(cache.get(key));
+        live = new Set(cache.get(key));
         return;
     }
 
-    let counts=new Map();
+    const counts = new Map();
 
     for(let k of live){
-        let [x,y]=dec(k);
+        const [x,y] = dec(k);
         for(let dx=-1;dx<=1;dx++){
             for(let dy=-1;dy<=1;dy++){
                 if(!dx&&!dy) continue;
-                let nk=enc(x+dx,y+dy);
+                const nk = enc(x+dx,y+dy);
                 counts.set(nk,(counts.get(nk)||0)+1);
             }
         }
     }
 
-    let next=new Set();
+    const next = new Set();
     for(let [k,c] of counts){
-        if(c===3||(c===2&&live.has(k))) next.add(k);
+        if(c===3 || (c===2 && live.has(k))) next.add(k);
     }
 
     cache.set(key,[...next]);
-    live=next;
+    live = next;
 }
 
 // =====================
-// Interaction
+// RLE Import
 // =====================
-let offX=canvas.width/2, offY=canvas.height/2;
-let scale=8;
-let mouseX=0, mouseY=0;
+function loadRLE(text, ox=0, oy=0){
+    let lines = text.split("\n").filter(l=>!l.startsWith("#"));
+    let body = lines.slice(1).join("");
 
-canvas.onmousemove=e=>{
-    mouseX=e.clientX;
-    mouseY=e.clientY;
-};
+    let x=0,y=0,num="";
 
-canvas.onclick=e=>{
-    let x=Math.floor((e.clientX-offX)/scale);
-    let y=Math.floor((e.clientY-offY)/scale);
+    for(let c of body){
+        if(/\d/.test(c)){ num+=c; continue; }
+        let n = num?parseInt(num):1;
+        num="";
+
+        if(c==="b") x+=n;
+        else if(c==="o"){
+            for(let i=0;i<n;i++){
+                live.add(enc(x+ox,y+oy));
+                x++;
+            }
+        }
+        else if(c==="$"){ y+=n; x=0; }
+        else if(c==="!") break;
+    }
+}
+
+// =====================
+// View / Interaction
+// =====================
+let offX = canvas.width/2;
+let offY = canvas.height/2;
+let scale = 8;
+
+canvas.onclick = e=>{
+    const x = Math.floor((e.clientX-offX)/scale);
+    const y = Math.floor((e.clientY-offY)/scale);
 
     if(stampMode){
-        for(let p of patterns[currentPattern]){
-            let [dx,dy]=rotate(p);
+        const pat = patterns[currentPattern];
+        for(let [dx,dy] of pat){
             live.add(enc(x+dx,y+dy));
         }
     } else {
-        let k=enc(x,y);
+        const k = enc(x,y);
         if(live.has(k)) live.delete(k);
         else live.add(k);
     }
 };
 
-canvas.onwheel=e=>{
+canvas.onwheel = e=>{
     e.preventDefault();
-    let z=e.deltaY<0?1.1:0.9;
-    offX=e.clientX-(e.clientX-offX)*z;
-    offY=e.clientY-(e.clientY-offY)*z;
-    scale*=z;
-    scale=Math.max(2,Math.min(40,scale));
+    const z = e.deltaY<0?1.1:0.9;
+
+    offX = e.clientX - (e.clientX-offX)*z;
+    offY = e.clientY - (e.clientY-offY)*z;
+
+    scale *= z;
+    scale = Math.max(2, Math.min(40, scale));
+};
+
+let dragging=false, lx,ly;
+canvas.onmousedown=e=>{dragging=true; lx=e.clientX; ly=e.clientY;};
+canvas.onmouseup=()=>dragging=false;
+
+canvas.onmousemove=e=>{
+    if(dragging){
+        offX+=e.clientX-lx;
+        offY+=e.clientY-ly;
+        lx=e.clientX; ly=e.clientY;
+    }
 };
 
 // =====================
-// Render (with ghost)
+// Render (GPU)
 // =====================
 function draw(){
-    let arr=[];
+    const arr = new Float32Array(live.size*2);
+    let i=0;
 
     for(let k of live){
-        let [x,y]=dec(k);
-        arr.push(x,y);
+        const [x,y]=dec(k);
+        arr[i++] = x;
+        arr[i++] = y;
     }
 
-    // ghost preview
-    if(stampMode){
-        let gx=Math.floor((mouseX-offX)/scale);
-        let gy=Math.floor((mouseY-offY)/scale);
+    gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
 
-        for(let p of patterns[currentPattern]){
-            let [dx,dy]=rotate(p);
-            arr.push(gx+dx, gy+dy);
-        }
-    }
+    gl.uniform2f(u_offset, offX, offY);
+    gl.uniform1f(u_scale, scale);
+    gl.uniform2f(u_resolution, canvas.width, canvas.height);
 
-    let data=new Float32Array(arr);
-    gl.bufferData(gl.ARRAY_BUFFER,data,gl.DYNAMIC_DRAW);
-
-    gl.uniform2f(u_offset,offX,offY);
-    gl.uniform1f(u_scale,scale);
-    gl.uniform2f(u_resolution,canvas.width,canvas.height);
-
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-
-    gl.clearColor(0,0,0,0.15); // trail fade
+    gl.clearColor(0,0,0,1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    gl.drawArrays(gl.POINTS,0,data.length/2);
+    gl.drawArrays(gl.POINTS, 0, arr.length/2);
 }
 
 // =====================
@@ -317,258 +303,25 @@ step.onclick=()=>{step(); draw();}
 clear.onclick=()=>live.clear();
 
 save.onclick=()=>{
-    let blob=new Blob([JSON.stringify([...live])]);
-    let a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download="life.json";
+    const blob = new Blob([JSON.stringify([...live])]);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "life.json";
     a.click();
 };
 
 load.onchange=e=>{
-    let r=new FileReader();
-    r.onload=()=>live=new Set(JSON.parse(r.result));
-    r.readAsText(e.target.files[0]);
-};
-
-rle.onchange=e=>{
-    let r=new FileReader();
-    r.onload=()=>loadRLE(r.result);
-    r.readAsText(e.target.files[0]);
-};
-
-// RLE loader (same as before)
-function loadRLE(text,ox=0,oy=0){
-    let lines=text.split("\n").filter(l=>!l.startsWith("#"));
-    let body=lines.slice(1).join("");
-    let x=0,y=0,num="";
-    for(let c of body){
-        if(/\d/.test(c)){num+=c;continue;}
-        let n=num?parseInt(num):1; num="";
-        if(c==="b") x+=n;
-        else if(c==="o"){for(let i=0;i<n;i++){live.add(enc(x+ox,y+oy));x++;}}
-        else if(c==="$"){y+=n;x=0;}
-        else if(c==="!") break;
-    }
-}
-</script>
-
-</body>
-</html>
-<script>
-// =====================
-// WebGL Renderer
-// =====================
-const canvas = document.getElementById("gl");
-const gl = canvas.getContext("webgl");
-
-function resize(){
-    canvas.width = innerWidth;
-    canvas.height = innerHeight;
-    gl.viewport(0,0,canvas.width,canvas.height);
-}
-addEventListener("resize", resize);
-resize();
-
-// shader
-const vs = `
-attribute vec2 a;
-uniform vec2 u_offset;
-uniform float u_scale;
-void main(){
-    vec2 p = (a * u_scale + u_offset);
-    vec2 clip = (p / vec2(${innerWidth.toFixed(1)},${innerHeight.toFixed(1)})) * 2.0 - 1.0;
-    gl_Position = vec4(clip.x, -clip.y, 0, 1);
-    gl_PointSize = u_scale;
-}`;
-const fs = `
-precision mediump float;
-void main(){
-    gl_FragColor = vec4(0.0,1.0,0.7,1.0);
-}`;
-
-// compile
-function compile(type,src){
-    let s=gl.createShader(type);
-    gl.shaderSource(s,src);
-    gl.compileShader(s);
-    return s;
-}
-let prog = gl.createProgram();
-gl.attachShader(prog,compile(gl.VERTEX_SHADER,vs));
-gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,fs));
-gl.linkProgram(prog);
-gl.useProgram(prog);
-
-let buf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-
-let a = gl.getAttribLocation(prog,"a");
-gl.enableVertexAttribArray(a);
-gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
-
-let u_offset = gl.getUniformLocation(prog,"u_offset");
-let u_scale = gl.getUniformLocation(prog,"u_scale");
-
-// =====================
-// Core Engine
-// =====================
-
-// integer encoding
-function enc(x,y){ return (x<<16) ^ (y & 0xffff); }
-function dec(k){ return [k>>16, (k<<16)>>16]; }
-
-let live = new Set();
-
-// =====================
-// Hashlife-lite cache
-// =====================
-let cache = new Map();
-
-function hashRegion(keys){
-    let h=0;
-    for(let k of keys) h = ((h<<5)-h) ^ k;
-    return h;
-}
-
-// simple memo step
-function stepCached(){
-    let key = hashRegion(live);
-    if(cache.has(key)){
-        live = new Set(cache.get(key));
-        return;
-    }
-
-    let counts = new Map();
-    for(let k of live){
-        let [x,y]=dec(k);
-        for(let dx=-1;dx<=1;dx++){
-            for(let dy=-1;dy<=1;dy++){
-                if(!dx&&!dy) continue;
-                let nk=enc(x+dx,y+dy);
-                counts.set(nk,(counts.get(nk)||0)+1);
-            }
-        }
-    }
-
-    let next = new Set();
-    for(let [k,c] of counts){
-        if(c===3 || (c===2 && live.has(k))) next.add(k);
-    }
-
-    cache.set(key, [...next]);
-    live = next;
-}
-
-// =====================
-// RLE Import
-// =====================
-function loadRLE(text, ox=0, oy=0){
-    let lines = text.split("\n").filter(l=>!l.startsWith("#"));
-    let body = lines.slice(1).join("");
-
-    let x=0,y=0,num="";
-    for(let c of body){
-        if(/\d/.test(c)){ num+=c; continue; }
-        let n = num?parseInt(num):1;
-        num="";
-
-        if(c==="b"){ x+=n; }
-        else if(c==="o"){
-            for(let i=0;i<n;i++){
-                live.add(enc(x+ox,y+oy));
-                x++;
-            }
-        }
-        else if(c==="$"){
-            y+=n; x=0;
-        }
-        else if(c==="!") break;
-    }
-}
-
-// =====================
-// Interaction
-// =====================
-let offX=canvas.width/2, offY=canvas.height/2;
-let scale=8;
-
-canvas.onclick=e=>{
-    let x=Math.floor((e.clientX-offX)/scale);
-    let y=Math.floor((e.clientY-offY)/scale);
-    let k=enc(x,y);
-    if(live.has(k)) live.delete(k);
-    else live.add(k);
-};
-
-canvas.onwheel=e=>{
-    e.preventDefault();
-    let z=e.deltaY<0?1.1:0.9;
-    offX = e.clientX - (e.clientX-offX)*z;
-    offY = e.clientY - (e.clientY-offY)*z;
-    scale*=z;
-};
-
-// =====================
-// Render (GPU)
-// =====================
-function draw(){
-    let arr=[];
-    for(let k of live){
-        let [x,y]=dec(k);
-        arr.push(x,y);
-    }
-
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(arr),gl.DYNAMIC_DRAW);
-
-    gl.uniform2f(u_offset, offX, offY);
-    gl.uniform1f(u_scale, scale);
-
-    gl.clearColor(0,0,0,1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    gl.drawArrays(gl.POINTS,0,arr.length/2);
-}
-
-// =====================
-// Loop
-// =====================
-let running=false;
-
-function loop(){
-    if(running) stepCached();
-    draw();
-    requestAnimationFrame(loop);
-}
-loop();
-
-// =====================
-// UI
-// =====================
-run.onclick=()=>running=true;
-pause.onclick=()=>running=false;
-step.onclick=()=>{stepCached(); draw();}
-clear.onclick=()=>live.clear();
-
-save.onclick=()=>{
-    let blob=new Blob([JSON.stringify([...live])]);
-    let a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download="life.json";
-    a.click();
-};
-
-load.onchange=e=>{
-    let r=new FileReader();
+    const r=new FileReader();
     r.onload=()=> live=new Set(JSON.parse(r.result));
     r.readAsText(e.target.files[0]);
 };
 
 rle.onchange=e=>{
-    let r=new FileReader();
+    const r=new FileReader();
     r.onload=()=> loadRLE(r.result);
     r.readAsText(e.target.files[0]);
 };
-
 </script>
+
 </body>
 </html>
