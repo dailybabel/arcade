@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conway's Game Of Life — One Shot Games Contest Entry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Michroma&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0d1117;
+    --surface2: #111820;
+    --amber: #ffb800;
+    --amber-dim: #a07500;
+    --amber-glow: rgba(255,184,0,0.12);
+    --green: #39ff14;
+    --green-glow: rgba(57,255,20,0.1);
+    --cyan: #00e5ff;
+    --cyan-glow: rgba(0,229,255,0.1);
+    --magenta: #ff00aa;
+    --text: #c8d8e8;
+    --text-dim: #55687a;
+    --scan-lines: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.25) 2px, rgba(0,0,0,0.25) 4px
+    );
+    --accent: var(--cyan);
+    --accent-glow: var(--cyan-glow);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: var(--scan-lines);
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.35;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.65) 100%);
+    pointer-events: none;
+    z-index: 9998;
+  }
+
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.025) 1px, transparent 1px);
+    background-size: 48px 48px;
+    animation: drift 28s linear infinite;
+    z-index: 0;
+  }
+  @keyframes drift {
+    from { background-position: 0 0; }
+    to   { background-position: 48px 48px; }
+  }
+
+  .page {
+    position: relative;
+    z-index: 10;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 3rem 2rem 6rem;
+  }
+
+  /* ── BREADCRUMB ── */
+  .breadcrumb {
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    color: var(--text-dim);
+    margin-bottom: 3rem;
+  }
+  .breadcrumb a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
+  .breadcrumb a:hover { color: var(--cyan); }
+  .breadcrumb .sep { margin: 0 0.6em; color: var(--amber-dim); }
+  .breadcrumb .current { color: var(--cyan); }
+
+  /* ── HEADER ── */
+  header { margin-bottom: 3rem; }
+
+  .header-accent {
+    font-size: 0.65rem;
+    letter-spacing: 0.45em;
+    color: var(--amber-dim);
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+  }
+
+  .page-title {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: clamp(1.6rem, 5vw, 3rem);
+    color: var(--text);
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+    text-shadow: 0 0 30px rgba(0,229,255,0.2), 0 0 60px rgba(0,229,255,0.1);
+    margin-bottom: 1rem;
+  }
+  .page-title .accent { color: var(--cyan); }
+
+  .header-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin-top: 1.2rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--text-dim);
+  }
+  .meta-item { display: flex; gap: 0.5em; align-items: center; }
+  .meta-label { color: var(--cyan); }
+
+  .header-line {
+    margin-top: 1.5rem;
+    height: 1px;
+    background: linear-gradient(90deg, var(--cyan), transparent);
+    opacity: 0.3;
+  }
+
+  /* ── GAME DESCRIPTION ── */
+  .game-desc-block {
+    background: var(--surface);
+    border: 1px solid rgba(0,229,255,0.1);
+    border-left: 3px solid var(--cyan);
+    padding: 1.1rem 1.4rem;
+    margin-bottom: 2.5rem;
+    font-size: 0.78rem;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  /* ── SECTION LABEL ── */
+  .section-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.4em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+    padding-left: 0.8rem;
+    border-left: 2px solid var(--cyan);
+  }
+
+  /* ── ACTION BUTTONS ── */
+  .action-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+  @media (max-width: 520px) { .action-strip { grid-template-columns: 1fr; } }
+
+  .action-btn {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.1rem 1.4rem;
+    background: var(--surface);
+    border: 1px solid rgba(0,229,255,0.15);
+    text-decoration: none;
+    color: var(--text);
+    position: relative;
+    overflow: hidden;
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+    transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s;
+  }
+  .action-btn::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 0; height: 0;
+    border-style: solid;
+    border-width: 0 16px 16px 0;
+    border-color: transparent rgba(0,229,255,0.25) transparent transparent;
+    transition: border-color 0.3s;
+  }
+  .action-btn:hover {
+    transform: translateY(-3px);
+    border-color: var(--cyan);
+    box-shadow: 0 0 20px rgba(0,229,255,0.15), 0 8px 30px rgba(0,0,0,0.5);
+  }
+  .action-btn:hover::after { border-color: transparent var(--cyan) transparent transparent; }
+  .action-btn.primary { border-color: rgba(0,229,255,0.3); }
+
+  .btn-icon {
+    font-size: 1.6rem;
+    flex-shrink: 0;
+    transition: transform 0.3s;
+    filter: drop-shadow(0 0 6px rgba(0,229,255,0.3));
+  }
+  .action-btn:hover .btn-icon { transform: scale(1.15); }
+
+  .btn-text { display: flex; flex-direction: column; }
+  .btn-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.2rem;
+  }
+  .btn-desc { font-size: 0.65rem; color: var(--text-dim); line-height: 1.4; }
+
+  /* ── INFO GRID ── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  @media (max-width: 540px) { .info-grid { grid-template-columns: 1fr; } }
+
+  .info-cell {
+    background: var(--surface);
+    border: 1px solid rgba(0,229,255,0.1);
+    padding: 1rem 1.2rem;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  }
+  .cell-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .cell-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--cyan);
+  }
+  .cell-value.sm { font-size: 0.72rem; }
+
+  /* ── ONE-SHOT BADGE ── */
+  .oneshot-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6em;
+    margin-bottom: 2.5rem;
+    padding: 0.5em 1.1em;
+    border: 1px solid rgba(255,184,0,0.35);
+    font-size: 0.65rem;
+    letter-spacing: 0.22em;
+    color: var(--amber);
+    background: rgba(255,184,0,0.04);
+    animation: badge-glow 3s ease-in-out infinite;
+  }
+  .badge-qualifier {
+    font-size: 0.58rem;
+    color: var(--amber-dim);
+    letter-spacing: 0.15em;
+    margin-left: 0.4em;
+  }
+  @keyframes badge-glow {
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: 0 0 16px rgba(255,184,0,0.18); }
+  }
+  .badge-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 6px var(--amber);
+    flex-shrink: 0;
+    animation: dot-pulse 2s ease-in-out infinite;
+  }
+  @keyframes dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ── PROMPT BLOCK ── */
+  .prompt-card {
+    background: var(--surface);
+    border: 1px solid rgba(0,229,255,0.12);
+    margin-bottom: 2.5rem;
+    position: relative;
+    overflow: hidden;
+    clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+  }
+  .prompt-card::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 0; height: 0;
+    border-style: solid;
+    border-width: 0 20px 20px 0;
+    border-color: transparent rgba(0,229,255,0.25) transparent transparent;
+  }
+
+  .prompt-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.65rem 1.4rem;
+    background: linear-gradient(90deg, rgba(0,229,255,0.06), transparent);
+    border-bottom: 1px solid rgba(0,229,255,0.1);
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .prompt-card-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 0.08em;
+  }
+  .prompt-badge {
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    padding: 0.2em 0.7em;
+    border: 1px solid var(--green);
+    color: var(--green);
+    text-shadow: 0 0 6px var(--green);
+    box-shadow: 0 0 8px var(--green-glow);
+    animation: green-pulse 2.5s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes green-pulse {
+    0%, 100% { box-shadow: 0 0 8px var(--green-glow); }
+    50% { box-shadow: 0 0 18px rgba(57,255,20,0.28); }
+  }
+
+  .prompt-body {
+    padding: 1.4rem 1.4rem 0.6rem;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.75;
+    overflow-x: auto;
+  }
+
+  .pl { display: flex; gap: 0.8rem; min-height: 1.75em; }
+  .ln {
+    user-select: none;
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    min-width: 2.2ch;
+    text-align: right;
+    opacity: 0.35;
+    padding-top: 0.08em;
+    flex-shrink: 0;
+  }
+  .lc { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .kw { color: var(--cyan); }
+  .cm { color: var(--text-dim); font-style: italic; }
+  .str { color: var(--amber); }
+  .hd { color: var(--magenta); font-weight: bold; }
+  .num { color: var(--green); }
+
+  .copy-btn {
+    display: block;
+    margin: 0.4rem 1.4rem 1.2rem auto;
+    background: transparent;
+    border: 1px solid rgba(0,229,255,0.25);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    padding: 0.35em 0.9em;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .copy-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+  .copy-btn.copied { border-color: var(--green); color: var(--green); }
+
+  /* ── FOOTER ── */
+  .page-footer {
+    border-top: 1px solid rgba(0,229,255,0.08);
+    padding-top: 2rem;
+    margin-top: 3rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    letter-spacing: 0.15em;
+  }
+  .page-footer a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
+  .page-footer a:hover { color: var(--cyan); }
+  .footer-cursor {
+    display: inline-block;
+    width: 6px; height: 0.85em;
+    background: var(--cyan);
+    animation: blink 1.2s step-end infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+    box-shadow: 0 0 5px var(--cyan);
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+  /* ── ENTRANCE ANIMATIONS ── */
+  .fade-in {
+    opacity: 0;
+    transform: translateY(16px);
+    animation: fadeIn 0.5s ease forwards;
+  }
+  @keyframes fadeIn { to { opacity: 1; transform: translateY(0); } }
+  .fi1 { animation-delay: 0.05s; }
+  .fi2 { animation-delay: 0.12s; }
+  .fi3 { animation-delay: 0.19s; }
+  .fi4 { animation-delay: 0.26s; }
+  .fi5 { animation-delay: 0.33s; }
+  .fi6 { animation-delay: 0.40s; }
+  .fi7 { animation-delay: 0.47s; }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<div class="page">
+
+  <!-- Breadcrumb -->
+  <nav class="breadcrumb fade-in fi1">
+    <a href="https://dailybabel.github.io/arcade/">ARCADE</a>
+    <span class="sep">/</span>
+    <span style="color:var(--text-dim)">CONTEST</span>
+    <span class="sep">/</span>
+    <span class="current">CONWAY'S GAME OF LIFE</span>
+  </nav>
+
+  <!-- Header -->
+  <header class="fade-in fi2">
+    <div class="header-accent">// Contest Entry — One Shot Games</div>
+    <h1 class="page-title"><span class="accent">Conway's Game<br>Of Life</span></h1>
+    <div class="header-meta">
+      <span class="meta-item"><span class="meta-label">ENTRANT</span> DailyBabel</span>
+      <span class="meta-item"><span class="meta-label">MODEL</span> Claude Sonnet 4.5</span>
+      <span class="meta-item"><span class="meta-label">SUBMITTED</span> 2026-03-19</span>
+    </div>
+    <div class="header-line"></div>
+  </header>
+
+  <!-- Game Description -->
+  <div class="game-desc-block fade-in fi2">
+    Conway's Game of Life is a zero-player cellular automaton where the entire universe unfolds from a single rule: each cell lives or dies based on how many neighbors it has. Drop a handful of cells and watch colonies explode, spaceships cruise across infinite space, and guns fire gliders forever — all from nothing but arithmetic applied repeatedly. It's the closest thing mathematics has to a creation myth.
+  </div>
+
+  <!-- Action Buttons -->
+  <div class="section-label fade-in fi3">Launch Pads</div>
+  <div class="action-strip fade-in fi3">
+    <a href="https://dailybabel.github.io/arcade/conways-gol.html" class="action-btn primary">
+      <span class="btn-icon">🦠</span>
+      <span class="btn-text">
+        <span class="btn-title">PLAY GAME</span>
+        <span class="btn-desc">Launch the one-shot entry. No saves. No mercy.</span>
+      </span>
+    </a>
+    <a href="https://raw.githubusercontent.com/dailybabel/arcade/refs/heads/main/GameOfLife.html"
+       target="_blank" rel="noopener" class="action-btn">
+      <span class="btn-icon">📄</span>
+      <span class="btn-text">
+        <span class="btn-title">VIEW RAW HTML</span>
+        <span class="btn-desc">Inspect the full output. Uncut. Unedited. (Allegedly.)</span>
+      </span>
+    </a>
+  </div>
+
+  <!-- Entry Data Grid -->
+  <div class="section-label fade-in fi4">Entry Data</div>
+  <div class="info-grid fade-in fi4">
+    <div class="info-cell">
+      <div class="cell-label">Game Title</div>
+      <div class="cell-value sm">CONWAY'S GAME OF LIFE</div>
+    </div>
+    <div class="info-cell">
+      <div class="cell-label">Model Used</div>
+      <div class="cell-value sm">CLAUDE SONNET 4.5</div>
+    </div>
+    <div class="info-cell">
+      <div class="cell-label">Genre</div>
+      <div class="cell-value">SIMULATOR</div>
+    </div>
+    <div class="info-cell">
+      <div class="cell-label">Prompt Length</div>
+      <div class="cell-value">≈ <span id="wordCount">—</span> WORDS</div>
+    </div>
+  </div>
+
+  <!-- One-Shot Badge -->
+  <div class="fade-in fi4">
+    <div class="oneshot-badge">
+      <div class="badge-dot"></div>
+      ONE-SHOT SUBMISSION — PROMPT → OUTPUT
+      <span class="badge-qualifier">( + MINOR UI FIXES )</span>
+    </div>
+  </div>
+
+  <br>
+
+  <!-- Prompt Block -->
+  <div class="section-label fade-in fi5">The Prompt</div>
+  <div class="prompt-card fade-in fi5">
+    <div class="prompt-card-header">
+      <span class="prompt-card-title">// VERBATIM PROMPT — AS SUBMITTED TO CLAUDE SONNET 4.5</span>
+      <span class="prompt-badge">ON RECORD</span>
+    </div>
+    <div class="prompt-body" id="promptBody">
+<div class="pl"><span class="ln">1</span><span class="lc"><span class="cm">// Conway's Game of Life — One Shot Games Contest Entry</span></span></div>
+<div class="pl"><span class="ln">2</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">3</span><span class="lc"><span class="kw">Create</span> a complete, production-quality implementation of <span class="str">Conway's Game of Life</span></span></div>
+<div class="pl"><span class="ln">4</span><span class="lc">as a <span class="kw">SINGLE</span> self-contained HTML file (no external dependencies, suitable for GitHub Pages).</span></div>
+<div class="pl"><span class="ln">5</span><span class="lc">This is a high-performance, competition-grade build. The result must be visually impressive,</span></div>
+<div class="pl"><span class="ln">6</span><span class="lc">technically optimized, and fully interactive.</span></div>
+<div class="pl"><span class="ln">7</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">8</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">9</span><span class="lc"><span class="hd">CORE REQUIREMENTS</span></span></div>
+<div class="pl"><span class="ln">10</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">11</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">12</span><span class="lc"><span class="str">1. Infinite Grid (Sparse Simulation)</span></span></div>
+<div class="pl"><span class="ln">13</span><span class="lc">- Do NOT use a 2D array.</span></div>
+<div class="pl"><span class="ln">14</span><span class="lc">- Use a <span class="kw">Set</span> of encoded cell coordinates (integer encoding preferred over strings).</span></div>
+<div class="pl"><span class="ln">15</span><span class="lc">- Use a <span class="kw">Map</span> to compute neighbor counts.</span></div>
+<div class="pl"><span class="ln">16</span><span class="lc">- Complexity must be <span class="num">O(N)</span> relative to live cells.</span></div>
+<div class="pl"><span class="ln">17</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">18</span><span class="lc"><span class="str">2. Simulation Engine</span></span></div>
+<div class="pl"><span class="ln">19</span><span class="lc">- Implement standard Conway's rules.</span></div>
+<div class="pl"><span class="ln">20</span><span class="lc">- Include a simple caching/memoization layer (hash current state → next state).</span></div>
+<div class="pl"><span class="ln">21</span><span class="lc">- Keep simulation and rendering decoupled.</span></div>
+<div class="pl"><span class="ln">22</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">23</span><span class="lc"><span class="str">3. GPU Rendering (WebGL REQUIRED)</span></span></div>
+<div class="pl"><span class="ln">24</span><span class="lc">- Use <span class="kw">WebGL</span> (not 2D canvas).</span></div>
+<div class="pl"><span class="ln">25</span><span class="lc">- Render cells as <span class="kw">GL_POINTS</span>.</span></div>
+<div class="pl"><span class="ln">26</span><span class="lc">- Use shaders (vertex + fragment).</span></div>
+<div class="pl"><span class="ln">27</span><span class="lc">- Pass resolution as a uniform (no hardcoded screen size).</span></div>
+<div class="pl"><span class="ln">28</span><span class="lc">- Use additive blending for visual effect.</span></div>
+<div class="pl"><span class="ln">29</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">30</span><span class="lc"><span class="str">4. Visual Effects ("Juice")</span></span></div>
+<div class="pl"><span class="ln">31</span><span class="lc">- Implement glow using fragment shader (radial falloff from point center).</span></div>
+<div class="pl"><span class="ln">32</span><span class="lc">- Add motion trails using partial framebuffer clearing (do NOT fully clear each frame).</span></div>
+<div class="pl"><span class="ln">33</span><span class="lc">- Use additive blending (<span class="kw">SRC_ALPHA, ONE</span>).</span></div>
+<div class="pl"><span class="ln">34</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">35</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">36</span><span class="lc"><span class="hd">INTERACTION</span></span></div>
+<div class="pl"><span class="ln">37</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">38</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">39</span><span class="lc"><span class="str">5. Controls</span></span></div>
+<div class="pl"><span class="ln">40</span><span class="lc">- Start / Pause / Step / Clear buttons</span></div>
+<div class="pl"><span class="ln">41</span><span class="lc">- Mouse click toggles cell (when not stamping)</span></div>
+<div class="pl"><span class="ln">42</span><span class="lc">- Click + drag pans the viewport</span></div>
+<div class="pl"><span class="ln">43</span><span class="lc">- Mouse wheel zooms (centered on cursor)</span></div>
+<div class="pl"><span class="ln">44</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">45</span><span class="lc"><span class="str">6. View Transform</span></span></div>
+<div class="pl"><span class="ln">46</span><span class="lc">- Maintain <span class="kw">offsetX</span>, <span class="kw">offsetY</span>, and <span class="kw">scale</span></span></div>
+<div class="pl"><span class="ln">47</span><span class="lc">- Convert between screen space and world coordinates correctly</span></div>
+<div class="pl"><span class="ln">48</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">49</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">50</span><span class="lc"><span class="hd">PATTERN SYSTEM</span></span></div>
+<div class="pl"><span class="ln">51</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">52</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">53</span><span class="lc"><span class="str">7. Stamp Mode</span></span></div>
+<div class="pl"><span class="ln">54</span><span class="lc">- Toggleable <span class="str">"Stamp Mode"</span> button</span></div>
+<div class="pl"><span class="ln">55</span><span class="lc">- When ON: clicking places a pattern instead of toggling a cell</span></div>
+<div class="pl"><span class="ln">56</span><span class="lc">- When OFF: clicking toggles a single cell</span></div>
+<div class="pl"><span class="ln">57</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">58</span><span class="lc"><span class="str">8. Pattern Library (built-in)</span></span></div>
+<div class="pl"><span class="ln">59</span><span class="lc">Include at least:</span></div>
+<div class="pl"><span class="ln">60</span><span class="lc">  * <span class="kw">Glider</span></span></div>
+<div class="pl"><span class="ln">61</span><span class="lc">  * <span class="kw">Glider Gun</span></span></div>
+<div class="pl"><span class="ln">62</span><span class="lc">  * <span class="kw">LWSS</span> (Lightweight spaceship)</span></div>
+<div class="pl"><span class="ln">63</span><span class="lc">  * <span class="kw">Pulsar</span></span></div>
+<div class="pl"><span class="ln">64</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">65</span><span class="lc"><span class="str">9. Pattern UX</span></span></div>
+<div class="pl"><span class="ln">66</span><span class="lc">- Dropdown to select current pattern</span></div>
+<div class="pl"><span class="ln">67</span><span class="lc">- Ghost preview of pattern under mouse cursor (semi-transparent)</span></div>
+<div class="pl"><span class="ln">68</span><span class="lc">- Rotation support:</span></div>
+<div class="pl"><span class="ln">69</span><span class="lc">    Press <span class="str">"R"</span> to rotate pattern <span class="num">90°</span> clockwise</span></div>
+<div class="pl"><span class="ln">70</span><span class="lc">    Apply rotation during placement AND preview</span></div>
+<div class="pl"><span class="ln">71</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">72</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">73</span><span class="lc"><span class="hd">FILE I/O</span></span></div>
+<div class="pl"><span class="ln">74</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">75</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">76</span><span class="lc"><span class="str">10. Save / Load</span></span></div>
+<div class="pl"><span class="ln">77</span><span class="lc">- Save current state to local JSON file</span></div>
+<div class="pl"><span class="ln">78</span><span class="lc">- Load JSON file to restore state</span></div>
+<div class="pl"><span class="ln">79</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">80</span><span class="lc"><span class="str">11. RLE Import</span></span></div>
+<div class="pl"><span class="ln">81</span><span class="lc">- Support LifeWiki <span class="kw">.rle</span> format</span></div>
+<div class="pl"><span class="ln">82</span><span class="lc">- Parse: <span class="str">"o"</span> = live cell, <span class="str">"b"</span> = dead cell skip,</span></div>
+<div class="pl"><span class="ln">83</span><span class="lc">        <span class="str">"$"</span> = new row, <span class="str">"!"</span> = end</span></div>
+<div class="pl"><span class="ln">84</span><span class="lc">- Ignore comment lines starting with <span class="str">"#"</span></span></div>
+<div class="pl"><span class="ln">85</span><span class="lc">- Allow user to load .rle file and insert into grid</span></div>
+<div class="pl"><span class="ln">86</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">87</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">88</span><span class="lc"><span class="hd">PERFORMANCE CONSTRAINTS</span></span></div>
+<div class="pl"><span class="ln">89</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">90</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">91</span><span class="lc">- Avoid string allocations in hot paths</span></div>
+<div class="pl"><span class="ln">92</span><span class="lc">- Avoid per-frame object creation where possible</span></div>
+<div class="pl"><span class="ln">93</span><span class="lc">- Use typed arrays for GPU upload</span></div>
+<div class="pl"><span class="ln">94</span><span class="lc">- Rendering must scale to large numbers of cells</span></div>
+<div class="pl"><span class="ln">95</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">96</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">97</span><span class="lc"><span class="hd">OUTPUT FORMAT</span></span></div>
+<div class="pl"><span class="ln">98</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">99</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">100</span><span class="lc">- Output <span class="kw">ONLY</span> a single HTML file</span></div>
+<div class="pl"><span class="ln">101</span><span class="lc">- Inline all CSS and JS</span></div>
+<div class="pl"><span class="ln">102</span><span class="lc">- No explanations, no commentary</span></div>
+<div class="pl"><span class="ln">103</span><span class="lc">- Code must be clean, readable, and well-structured</span></div>
+<div class="pl"><span class="ln">104</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">105</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">106</span><span class="lc"><span class="hd">QUALITY BAR</span></span></div>
+<div class="pl"><span class="ln">107</span><span class="lc"><span class="hd">========================</span></span></div>
+<div class="pl"><span class="ln">108</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">109</span><span class="lc">The result should feel like:</span></div>
+<div class="pl"><span class="ln">110</span><span class="lc">- A polished interactive tool</span></div>
+<div class="pl"><span class="ln">111</span><span class="lc">- Smooth and responsive</span></div>
+<div class="pl"><span class="ln">112</span><span class="lc">- Visually engaging (glow + trails)</span></div>
+<div class="pl"><span class="ln">113</span><span class="lc">- Technically competent (<span class="kw">GPU</span> + sparse + caching)</span></div>
+<div class="pl"><span class="ln">114</span><span class="lc"></span></div>
+<div class="pl"><span class="ln">115</span><span class="lc">Avoid placeholders, hacks, or partial implementations.</span></div>
+<div class="pl"><span class="ln">116</span><span class="lc">This is a <span class="str">showcase piece</span>.</span></div>
+    </div>
+    <button class="copy-btn" id="copyBtn" onclick="copyPrompt()">[ COPY PROMPT ]</button>
+  </div>
+
+  <!-- Footer -->
+  <footer class="page-footer fade-in fi7">
+    <span>ONE SHOT GAMES — CONTEST ENTRY<span class="footer-cursor"></span></span>
+    <span>
+      <a href="https://dailybabel.github.io/arcade/">← BACK TO ARCADE</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/dailybabel/arcade" target="_blank">GITHUB</a>
+    </span>
+  </footer>
+
+</div>
+
+<script>
+  // Auto-count words in prompt and fill in the cell
+  (function() {
+    const lines = document.querySelectorAll('#promptBody .lc');
+    const text = Array.from(lines).map(l => l.textContent).join(' ');
+    const count = text.trim().split(/\s+/).filter(Boolean).length;
+    document.getElementById('wordCount').textContent = count;
+  })();
+
+  function copyPrompt() {
+    const lines = document.querySelectorAll('#promptBody .lc');
+    const text = Array.from(lines).map(l => l.textContent).join('\n');
+    navigator.clipboard.writeText(text.trim()).then(() => {
+      const btn = document.getElementById('copyBtn');
+      btn.textContent = '[ COPIED ✓ ]';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = '[ COPY PROMPT ]';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  }
+</script>
+
+</body>
+</html>
