@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HIGHSEC BELT · Asteroid Mining · 0.9 SEC</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; }
+#c { display:block; position:fixed; top:0; left:0; }
+
+/* ── HUD LAYER ── */
+#hud {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  pointer-events:none; z-index:10;
+  font-family:'Share Tech Mono', monospace;
+  color:#7abfff;
+}
+/* CRT scanlines */
+#hud::after {
+  content:''; position:absolute; inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);
+  pointer-events:none;
+}
+
+.panel {
+  position:absolute;
+  background:rgba(3,10,24,0.88);
+  border:1px solid #0e2a50;
+  padding:10px 14px;
+  backdrop-filter:blur(3px);
+  box-shadow:0 0 24px rgba(0,80,200,0.07), inset 0 0 12px rgba(0,50,130,0.04);
+}
+.panel-title {
+  font-size:9px; letter-spacing:0.22em; color:#2a5a9a;
+  margin-bottom:8px; text-transform:uppercase;
+}
+
+/* TOP BAR */
+#topbar {
+  top:0; left:0; right:0;
+  display:flex; justify-content:space-between; align-items:center;
+  padding:7px 20px;
+  background:rgba(2,6,18,0.92);
+  border-bottom:1px solid #0a1e3a;
+  font-size:11px; letter-spacing:0.1em;
+}
+#topbar .sys  { color:#8abfff; font-size:12px; }
+#topbar .belt { color:#3a6a9a; }
+#topbar .isk  { color:#e8b840; font-size:12px; }
+
+/* SHIP STATUS — bottom left */
+#ship-status { bottom:20px; left:20px; width:210px; }
+
+.bar-row { margin-bottom:5px; }
+.bar-lbl { font-size:9px; letter-spacing:0.18em; color:#2a5080; margin-bottom:2px; }
+.bar-track {
+  height:5px; background:rgba(0,20,50,0.9);
+  border:1px solid #081830; overflow:hidden;
+}
+.bar-fill { height:100%; transition:width 0.4s; }
+.b-shield { background:linear-gradient(90deg,#1a55bb,#3ab0ff); }
+.b-armor  { background:linear-gradient(90deg,#bb4400,#ff7733); }
+.b-cap    { background:linear-gradient(90deg,#1a6070,#33bbdd); }
+
+.speed-row {
+  margin-top:9px; font-size:10px; color:#406090;
+  display:flex; justify-content:space-between;
+}
+.speed-val { color:#6aaae0; }
+
+/* CARGO — bottom right */
+#cargo-panel { bottom:20px; right:20px; width:250px; }
+.b-cargo { background:linear-gradient(90deg,#1a5530,#33bb77); }
+#cargo-text { font-size:10px; color:#3a6080; margin:4px 0 8px; }
+.ore-row {
+  display:flex; justify-content:space-between;
+  font-size:10px; padding:3px 0;
+  border-bottom:1px solid #081830; color:#3a6080;
+}
+.ore-name { color:#6aaae0; }
+.ore-isk  { color:#33aa66; }
+#dock-btn {
+  pointer-events:all; display:none; margin-top:10px;
+  width:100%; padding:8px;
+  background:rgba(255,150,0,0.08); border:1px solid #cc7700;
+  color:#ffaa33; font-family:'Share Tech Mono',monospace;
+  font-size:11px; letter-spacing:0.12em; cursor:pointer;
+  text-transform:uppercase; transition:background 0.2s, box-shadow 0.2s;
+}
+#dock-btn:hover { background:rgba(255,150,0,0.2); box-shadow:0 0 12px rgba(255,130,0,0.3); }
+
+/* TARGET — center bottom */
+#target-panel {
+  bottom:20px; left:50%; transform:translateX(-50%);
+  width:310px; text-align:center;
+}
+#tgt-name    { font-size:12px; color:#8abfff; letter-spacing:0.18em; margin-bottom:3px; }
+#tgt-sub     { font-size:9px;  color:#2a5080; margin-bottom:7px; }
+.tgt-bar-track { height:3px; background:rgba(0,20,50,0.9); border:1px solid #081830; overflow:hidden; margin-bottom:7px; }
+.tgt-bar-fill  { height:100%; background:linear-gradient(90deg,#882200,#ff5522); transition:width 0.6s; }
+#mine-status { font-size:10px; letter-spacing:0.1em; min-height:14px; }
+#mine-prog-track { height:3px; background:rgba(0,20,50,0.9); border:1px solid #663300; overflow:hidden; margin-top:5px; display:none; }
+#mine-prog-fill  { height:100%; background:linear-gradient(90deg,#cc5500,#ffcc00); }
+
+/* CONTROLS — top left */
+#ctrl-hint {
+  position:absolute; top:44px; left:20px;
+  font-size:9px; letter-spacing:0.1em; color:#1a3a5a; line-height:2;
+}
+
+/* NOTIFICATION */
+#notif {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  padding:12px 28px;
+  background:rgba(3,10,24,0.96); border:1px solid #cc7700;
+  color:#ffaa33; font-size:11px; letter-spacing:0.1em; text-align:center;
+  opacity:0; transition:opacity 0.4s; pointer-events:none; max-width:500px;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="arrow" style="position:fixed;top:0;left:0;pointer-events:none;z-index:9;"></canvas>
+
+<div id="hud">
+  <div id="topbar">
+    <span class="sys">RENS · HEIMATAR</span>
+    <span class="belt">Asteroid Belt I-1 &nbsp;·&nbsp; SAFE ZONE &nbsp;·&nbsp; 0.9 SEC</span>
+    <span class="isk" id="isk">ISK: 0</span>
+  </div>
+
+  <div id="ctrl-hint">
+    W/S &nbsp;THRUST<br>
+    A/D &nbsp;ROTATE<br>
+    Q/E &nbsp;STRAFE<br>
+    CLICK &nbsp;TARGET<br>
+    SPACE &nbsp;MINE<br>
+    F &nbsp;DOCK
+  </div>
+
+  <div class="panel" id="ship-status">
+    <div class="panel-title">SHIP STATUS &nbsp;·&nbsp; VENTURE</div>
+    <div class="bar-row"><div class="bar-lbl">SHIELD</div>
+      <div class="bar-track"><div class="bar-fill b-shield" id="b-shield" style="width:100%"></div></div></div>
+    <div class="bar-row"><div class="bar-lbl">ARMOR</div>
+      <div class="bar-track"><div class="bar-fill b-armor" id="b-armor" style="width:100%"></div></div></div>
+    <div class="bar-row"><div class="bar-lbl">CAPACITOR</div>
+      <div class="bar-track"><div class="bar-fill b-cap" id="b-cap" style="width:100%"></div></div></div>
+    <div class="speed-row"><span>VELOCITY</span><span class="speed-val"><span id="spd">0</span> m/s</span></div>
+  </div>
+
+  <div class="panel" id="target-panel">
+    <div id="tgt-name">[ NO TARGET ]</div>
+    <div id="tgt-sub">Click an asteroid to target</div>
+    <div class="tgt-bar-track"><div class="tgt-bar-fill" id="tgt-hp" style="width:100%"></div></div>
+    <div id="mine-status"></div>
+    <div id="mine-prog-track"><div id="mine-prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="panel" id="cargo-panel">
+    <div class="panel-title">CARGO HOLD &nbsp;·&nbsp; 5000 m³</div>
+    <div class="bar-track"><div class="bar-fill b-cargo" id="b-cargo" style="width:0%"></div></div>
+    <div id="cargo-text">0 / 5000 m³</div>
+    <div id="ore-manifest"></div>
+    <button id="dock-btn" onclick="dockAtStation()">⏎ &nbsp;RETURN TO STATION</button>
+  </div>
+
+  <div id="notif"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+// ══ RENDERER ════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x010409);
+
+// ══ SCENE / CAMERA ══════════════════════════════════════════════════════════
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x010409, 0.0014);
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth/window.innerHeight, 0.1, 3000);
+
+// ══ LIGHTING ════════════════════════════════════════════════════════════════
+scene.add(new THREE.AmbientLight(0x0a1a30, 1.2));
+
+const sun = new THREE.DirectionalLight(0xfff8e0, 2.2);
+sun.position.set(300, 150, 80);
+scene.add(sun);
+
+// Nebula fill — cool blue from far left, warm red from far right
+const nL1 = new THREE.PointLight(0x1a33aa, 0.5, 900); nL1.position.set(-400,120,-250); scene.add(nL1);
+const nL2 = new THREE.PointLight(0xaa3311, 0.35, 700); nL2.position.set(400,-80, 350); scene.add(nL2);
+
+// ══ STARS ═══════════════════════════════════════════════════════════════════
+(function () {
+  const N = 7000;
+  const pos = new Float32Array(N*3), col = new Float32Array(N*3);
+  for (let i=0;i<N;i++){
+    pos[i*3]=(Math.random()-.5)*3500; pos[i*3+1]=(Math.random()-.5)*3500; pos[i*3+2]=(Math.random()-.5)*3500;
+    const t=Math.random();
+    if      (t<0.07){ col[i*3]=1;   col[i*3+1]=0.55; col[i*3+2]=0.25; } // orange giant
+    else if (t<0.22){ col[i*3]=0.5; col[i*3+1]=0.65; col[i*3+2]=1; }    // blue
+    else             { const b=0.65+Math.random()*0.35; col[i*3]=b; col[i*3+1]=b; col[i*3+2]=b; }
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',   new THREE.BufferAttribute(col,3));
+  scene.add(new THREE.Points(geo,new THREE.PointsMaterial({size:0.55,vertexColors:true,sizeAttenuation:true,transparent:true,opacity:0.9})));
+})();
+
+// ══ ORE DEFINITIONS ══════════════════════════════════════════════════════════
+const ORES = {
+  veldspar:    {name:'Veldspar',   color:0x9a8a78, emissive:0x0e0b08, yield:100, value:11,  vol:0.10},
+  scordite:    {name:'Scordite',   color:0xb86830, emissive:0x1e0a04, yield:75,  value:26,  vol:0.15},
+  plagioclase: {name:'Plagioclase',color:0x607898, emissive:0x080e18, yield:55,  value:43,  vol:0.25},
+  pyroxeres:   {name:'Pyroxeres',  color:0x38604a, emissive:0x060e08, yield:42,  value:68,  vol:0.32},
+};
+const ORE_KEYS = Object.keys(ORES);
+
+// ══ ASTEROIDS ════════════════════════════════════════════════════════════════
+const asteroids = [];
+
+function makeAsteroid(p, oreKey, radius) {
+  const ore = ORES[oreKey];
+  const detail = radius > 7 ? 2 : 1;
+  const geo = new THREE.IcosahedronGeometry(1, detail);
+  const attr = geo.attributes.position;
+  // Displace vertices for lumpy, craggy look
+  for (let i=0;i<attr.count;i++){
+    const v=new THREE.Vector3().fromBufferAttribute(attr,i);
+    v.normalize().multiplyScalar(0.68 + Math.random()*0.60);
+    attr.setXYZ(i,v.x,v.y,v.z);
+  }
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshPhongMaterial({color:ore.color,emissive:ore.emissive,shininess:14,specular:0x141414});
+  const mesh = new THREE.Mesh(geo,mat);
+  mesh.position.copy(p);
+  mesh.scale.setScalar(radius);
+  mesh.rotation.set(Math.random()*6,Math.random()*6,Math.random()*6);
+  scene.add(mesh);
+  const data = {mesh,oreType:oreKey,health:100,maxHealth:100,radius,
+    rotV:new THREE.Vector3((Math.random()-.5)*.006,(Math.random()-.5)*.004,(Math.random()-.5)*.003)};
+  asteroids.push(data);
+  return data;
+}
+
+// Populate belt — loose ring with clusters
+for (let i=0;i<30;i++){
+  const angle=(i/30)*Math.PI*2+(Math.random()-.5)*0.5;
+  const r=65+Math.random()*90;
+  const p=new THREE.Vector3(
+    Math.cos(angle)*r+(Math.random()-.5)*28,
+    (Math.random()-.5)*20,
+    Math.sin(angle)*r+(Math.random()-.5)*28
+  );
+  const rnd=Math.random();
+  const oreKey = rnd<0.45?'veldspar':rnd<0.70?'scordite':rnd<0.88?'plagioclase':'pyroxeres';
+  makeAsteroid(p, oreKey, 3.5+Math.random()*9);
+}
+
+// ══ STATION ═══════════════════════════════════════════════════════════════
+const stGroup = new THREE.Group();
+const stMat  = new THREE.MeshPhongMaterial({color:0x2e404e,specular:0x5a7488,shininess:55});
+const stMat2 = new THREE.MeshPhongMaterial({color:0x1e303c,shininess:30});
+
+// Hull
+stGroup.add(new THREE.Mesh(new THREE.BoxGeometry(10,5,32),stMat));
+// Docking collar rings
+[12,15].forEach(z=>{
+  const r=new THREE.Mesh(new THREE.TorusGeometry(5.5,0.35,10,32),
+    new THREE.MeshPhongMaterial({color:0xffaa22,emissive:0x331800,shininess:80}));
+  r.rotation.x=Math.PI/2; r.position.z=z; stGroup.add(r);
+});
+// Solar wings
+[-1,1].forEach(side=>{
+  const arm=new THREE.Mesh(new THREE.BoxGeometry(1,0.6,10),stMat2);
+  arm.position.set(side*9,3.5,-3); stGroup.add(arm);
+  const panel=new THREE.Mesh(new THREE.BoxGeometry(14,0.14,7),
+    new THREE.MeshPhongMaterial({color:0x112288,emissive:0x08103c,shininess:90}));
+  panel.position.set(side*16,3.5,-3); stGroup.add(panel);
+});
+// Comms tower
+const tower=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.4,8,8),stMat2);
+tower.position.set(0,6,0); stGroup.add(tower);
+const dish=new THREE.Mesh(new THREE.CylinderGeometry(2,0.3,1,12,1,true),stMat2);
+dish.position.set(0,11,0); dish.rotation.x=-0.3; stGroup.add(dish);
+// Light
+const dockLight=new THREE.PointLight(0xffaa33,2,120);
+dockLight.position.set(0,0,16); stGroup.add(dockLight);
+
+stGroup.position.set(260,15,260); stGroup.rotation.y=Math.PI*0.25;
+scene.add(stGroup);
+const DOCK_RANGE=50;
+
+// ══ SHIP ══════════════════════════════════════════════════════════════════
+const shipGroup = new THREE.Group();
+const sMat  = new THREE.MeshPhongMaterial({color:0x263442,specular:0x4a6a88,shininess:75});
+const sMat2 = new THREE.MeshPhongMaterial({color:0x1a2530,specular:0x3a5566,shininess:50});
+
+// Main hull (tapered box — stretch with scale trick)
+const hullGeo = new THREE.BoxGeometry(1.9,0.65,6.5);
+shipGroup.add(new THREE.Mesh(hullGeo,sMat));
+// Wings
+const wingMesh = new THREE.Mesh(new THREE.BoxGeometry(8,0.14,2.6),sMat2);
+wingMesh.position.z=0.6; shipGroup.add(wingMesh);
+// Nose
+const noseMesh = new THREE.Mesh(new THREE.ConeGeometry(0.48,2.8,8),sMat);
+noseMesh.rotation.x=-Math.PI/2; noseMesh.position.z=-4.6; shipGroup.add(noseMesh);
+// Mining turrets
+[-0.65,0.65].forEach(x=>{
+  const t=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.22,0.9),
+    new THREE.MeshPhongMaterial({color:0x3a4f60,specular:0x667788}));
+  t.position.set(x,0.44,-1.8); shipGroup.add(t);
+});
+// Nacelles
+[-0.55,0.55].forEach(x=>{
+  const n=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.38,1.4,8),
+    new THREE.MeshPhongMaterial({color:0x0f1520,emissive:0x000408}));
+  n.rotation.x=Math.PI/2; n.position.set(x,-0.1,3.4); shipGroup.add(n);
+});
+const engineLight=new THREE.PointLight(0x3377ff,0,18);
+engineLight.position.z=3.8; shipGroup.add(engineLight);
+scene.add(shipGroup);
+
+// ══ MINING LASER ══════════════════════════════════════════════════════════
+function makeLine(color, opacity=1) {
+  const buf = new Float32Array(6);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(buf,3));
+  const mat = new THREE.LineBasicMaterial({color, transparent:opacity<1, opacity});
+  const line = new THREE.Line(geo, mat);
+  line.visible = false;
+  line.frustumCulled = false;
+  scene.add(line);
+  return {line, buf, mat};
+}
+const laser1 = makeLine(0xffaa00);
+const laser2 = makeLine(0xff6600, 0.35);
+const laserGlow = new THREE.PointLight(0xff8800, 0, 50); scene.add(laserGlow);
+
+function setLaserPoints(obj, s, e) {
+  const b = obj.buf;
+  b[0]=s.x;b[1]=s.y;b[2]=s.z; b[3]=e.x;b[4]=e.y;b[5]=e.z;
+  obj.line.geometry.attributes.position.needsUpdate = true;
+}
+
+// ══ ORE PARTICLES ═════════════════════════════════════════════════════════
+const pSystems = [];
+function spawnParticles(wp, col) {
+  const N=12, buf=new Float32Array(N*3), vels=[];
+  for(let i=0;i<N;i++){buf[i*3]=wp.x;buf[i*3+1]=wp.y;buf[i*3+2]=wp.z;
+    vels.push(new THREE.Vector3((Math.random()-.5)*7,(Math.random()-.5)*7,(Math.random()-.5)*7));}
+  const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(buf,3));
+  const pts=new THREE.Points(geo,new THREE.PointsMaterial({color:col,size:0.8,sizeAttenuation:true,transparent:true,opacity:1}));
+  scene.add(pts); pSystems.push({pts,vels,buf,life:2.0,max:2.0});
+}
+
+// ══ GAME STATE ════════════════════════════════════════════════════════════
+const shipPos = new THREE.Vector3();
+const shipVel = new THREE.Vector3();
+let shipYaw   = 0;
+const THRUST=20, DRAG=0.963, TURN=1.65, MAXSPD=48;
+
+let targetAst=null, mining=false, mineTimer=0;
+const MINE_CYCLE=4.0, MINE_RANGE=88;
+let cap=100;
+const CAP_MAX=100, CAP_REGEN=6, CAP_DRAIN=9;
+
+const CARGO_MAX=5000;
+let cargoUsed=0;
+const manifest = Object.fromEntries(ORE_KEYS.map(k=>[k,0]));
+let totalISK=0;
+
+// ══ CONTROLS ══════════════════════════════════════════════════════════════
+const keys={};
+window.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code==='Space'){e.preventDefault(); toggleMine();}
+  if(e.code==='KeyF') dockAtStation();
+});
+window.addEventListener('keyup',e=>{keys[e.code]=false;});
+
+const raycaster=new THREE.Raycaster();
+window.addEventListener('click',e=>{
+  const mx=(e.clientX/window.innerWidth)*2-1;
+  const my=-(e.clientY/window.innerHeight)*2+1;
+  raycaster.setFromCamera(new THREE.Vector2(mx,my),camera);
+  const meshes=asteroids.filter(a=>a.health>0).map(a=>a.mesh);
+  const hits=raycaster.intersectObjects(meshes);
+  if(hits.length){
+    targetAst=asteroids.find(a=>a.mesh===hits[0].object)||null;
+    mining=false; mineTimer=0;
+  } else { targetAst=null; mining=false; }
+});
+
+function toggleMine(){
+  if(!targetAst||targetAst.health<=0) return;
+  mining=!mining; mineTimer=0;
+}
+
+// ══ DOCK ══════════════════════════════════════════════════════════════════
+function dockAtStation(){
+  if(cargoUsed<1){ showNotif('⚠ CARGO HOLD IS EMPTY — mine some ore first'); return; }
+  let earned=0;
+  for(const [k,u] of Object.entries(manifest)){ earned+=Math.floor(u*ORES[k].value); manifest[k]=0; }
+  totalISK+=earned; cargoUsed=0; mining=false;
+  showNotif(`✓ DOCKED · Sold ore for ${earned.toLocaleString()} ISK · Running total: ${totalISK.toLocaleString()} ISK`);
+}
+
+// ══ NOTIFICATIONS ═════════════════════════════════════════════════════════
+let nTimeout=null;
+function showNotif(msg){
+  const el=document.getElementById('notif');
+  el.textContent=msg; el.style.opacity='1';
+  if(nTimeout) clearTimeout(nTimeout);
+  nTimeout=setTimeout(()=>{el.style.opacity='0';},4000);
+}
+
+// ══ HUD UPDATE ════════════════════════════════════════════════════════════
+function updateHUD(){
+  // Capacitor
+  const capEl=document.getElementById('b-cap');
+  capEl.style.width=cap+'%';
+  capEl.style.background=cap>25?'linear-gradient(90deg,#1a6070,#33bbdd)':'linear-gradient(90deg,#7a1800,#dd3311)';
+
+  // Speed
+  document.getElementById('spd').textContent=Math.round(shipVel.length()*10);
+
+  // Cargo
+  const pct=(cargoUsed/CARGO_MAX)*100;
+  const cbar=document.getElementById('b-cargo');
+  cbar.style.width=pct+'%';
+  cbar.style.background=pct>85?'linear-gradient(90deg,#884400,#ddaa00)':'linear-gradient(90deg,#1a5530,#33bb77)';
+  document.getElementById('cargo-text').textContent=`${Math.round(cargoUsed)} / ${CARGO_MAX} m³`;
+  document.getElementById('isk').textContent=`ISK: ${totalISK.toLocaleString()}`;
+
+  // Ore manifest
+  let html='';
+  for(const [k,u] of Object.entries(manifest)){
+    if(u>0.5) html+=`<div class="ore-row"><span class="ore-name">${ORES[k].name}</span><span class="ore-isk">${Math.round(u)}u · ${Math.round(u*ORES[k].value).toLocaleString()} ISK</span></div>`;
+  }
+  document.getElementById('ore-manifest').innerHTML=html;
+  document.getElementById('dock-btn').style.display=cargoUsed>0.5?'block':'none';
+
+  // Target
+  if(targetAst&&targetAst.health>0){
+    const ore=ORES[targetAst.oreType];
+    const dist=Math.round(shipPos.distanceTo(targetAst.mesh.position));
+    document.getElementById('tgt-name').textContent=`[ ${ore.name.toUpperCase()} ASTEROID ]`;
+    document.getElementById('tgt-sub').textContent=`${ore.value} ISK/unit · ${ore.yield} u/cycle · ${dist} m`;
+    document.getElementById('tgt-hp').style.width=targetAst.health+'%';
+    const ms=document.getElementById('mine-status');
+    const pt=document.getElementById('mine-prog-track');
+    const pf=document.getElementById('mine-prog-fill');
+    if(mining&&dist<=MINE_RANGE){
+      ms.textContent='⬢ MINING LASER ACTIVE'; ms.style.color='#ffaa33';
+      pt.style.display='block'; pf.style.width=((mineTimer/MINE_CYCLE)*100)+'%';
+    } else if(dist>MINE_RANGE){
+      ms.textContent=`⚠ OUT OF RANGE  ${dist}m / ${MINE_RANGE}m max`; ms.style.color='#ff4422'; pt.style.display='none';
+    } else {
+      ms.textContent='[SPACE] activate mining laser'; ms.style.color='#33aa66'; pt.style.display='none';
+    }
+  } else {
+    document.getElementById('tgt-name').textContent='[ NO TARGET ]';
+    document.getElementById('tgt-sub').textContent='Click an asteroid to target';
+    document.getElementById('tgt-hp').style.width='0%';
+    document.getElementById('mine-status').textContent='';
+    document.getElementById('mine-prog-track').style.display='none';
+  }
+}
+
+// ══ STATION DIRECTION INDICATOR ═══════════════════════════════════════════
+const arrowC=document.getElementById('arrow'), arrowX=arrowC.getContext('2d');
+function drawArrow(){
+  arrowC.width=window.innerWidth; arrowC.height=window.innerHeight;
+  arrowX.clearRect(0,0,arrowC.width,arrowC.height);
+  const sp=stGroup.position.clone().project(camera);
+  const sx=(sp.x*.5+.5)*window.innerWidth, sy=(-sp.y*.5+.5)*window.innerHeight;
+  const onScreen=sx>70&&sx<window.innerWidth-70&&sy>70&&sy<window.innerHeight-70&&sp.z<1;
+  const dist=Math.round(shipPos.distanceTo(stGroup.position));
+  arrowX.font='10px Share Tech Mono'; arrowX.textAlign='center';
+
+  if(!onScreen){
+    const cx=window.innerWidth/2, cy=window.innerHeight/2;
+    const ang=Math.atan2(sy-cy,sx-cx);
+    const m=62;
+    const ex=Math.max(m,Math.min(window.innerWidth-m,cx+Math.cos(ang)*500));
+    const ey=Math.max(m,Math.min(window.innerHeight-m,cy+Math.sin(ang)*370));
+    arrowX.save(); arrowX.translate(ex,ey); arrowX.rotate(ang+Math.PI/2);
+    arrowX.strokeStyle='#cc8822'; arrowX.fillStyle='rgba(220,130,30,0.55)'; arrowX.lineWidth=1.5;
+    arrowX.beginPath(); arrowX.moveTo(0,-15); arrowX.lineTo(9,9); arrowX.lineTo(0,4); arrowX.lineTo(-9,9);
+    arrowX.closePath(); arrowX.fill(); arrowX.stroke(); arrowX.restore();
+    arrowX.fillStyle='#cc8822'; arrowX.fillText(`STATION · ${dist.toLocaleString()}m`,ex,ey+26);
+  } else {
+    const sz=26;
+    arrowX.strokeStyle='#cc8822'; arrowX.lineWidth=1.5;
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(([dx,dy])=>{
+      arrowX.beginPath();
+      arrowX.moveTo(sx+dx*sz,sy+dy*(sz-9)); arrowX.lineTo(sx+dx*sz,sy+dy*sz); arrowX.lineTo(sx+dx*(sz-9),sy+dy*sz);
+      arrowX.stroke();
+    });
+    arrowX.fillStyle='#cc8822'; arrowX.fillText(`STATION · ${dist}m`,sx,sy+sz+14);
+    if(dist<DOCK_RANGE){ arrowX.fillStyle='#44ffaa'; arrowX.fillText('[F] DOCK',sx,sy+sz+27); }
+  }
+}
+
+// ══ CAMERA STATE ══════════════════════════════════════════════════════════
+const camCurPos=new THREE.Vector3(0,12,35);
+const camLook=new THREE.Vector3();
+
+// ══ ANIMATION LOOP ════════════════════════════════════════════════════════
+let lastT=0, totalT=0;
+
+function animate(t){
+  requestAnimationFrame(animate);
+  const dt=Math.min((t-lastT)/1000,0.05); lastT=t; totalT+=dt;
+
+  // Derived directions
+  const fwd=new THREE.Vector3(-Math.sin(shipYaw),0,-Math.cos(shipYaw));
+  const rgt=new THREE.Vector3(Math.cos(shipYaw),0,-Math.sin(shipYaw));
+
+  // ── SHIP CONTROLS ──
+  let thrusting=false;
+  if(keys['KeyW']||keys['ArrowUp'])    {shipVel.addScaledVector(fwd, THRUST*dt);   thrusting=true;}
+  if(keys['KeyS']||keys['ArrowDown'])  {shipVel.addScaledVector(fwd,-THRUST*0.4*dt);}
+  if(keys['KeyA']||keys['ArrowLeft'])  {shipYaw+=TURN*dt;}
+  if(keys['KeyD']||keys['ArrowRight']) {shipYaw-=TURN*dt;}
+  if(keys['KeyQ']){shipVel.addScaledVector(rgt,-THRUST*0.65*dt);}
+  if(keys['KeyE']){shipVel.addScaledVector(rgt, THRUST*0.65*dt);}
+
+  if(shipVel.length()>MAXSPD) shipVel.setLength(MAXSPD);
+  shipVel.multiplyScalar(DRAG);
+  shipPos.addScaledVector(shipVel,dt);
+  shipGroup.position.copy(shipPos);
+  shipGroup.rotation.y=shipYaw;
+
+  // Engine flicker
+  engineLight.intensity=thrusting?(1.4+Math.sin(totalT*22)*0.4):0;
+
+  // ── CAPACITOR ──
+  if(mining) cap=Math.max(0,cap-CAP_DRAIN*dt);
+  else       cap=Math.min(CAP_MAX,cap+CAP_REGEN*dt);
+
+  // ── MINING ──
+  laser1.line.visible=false; laser2.line.visible=false; laserGlow.intensity=0;
+
+  if(mining&&targetAst&&targetAst.health>0){
+    const dist=shipPos.distanceTo(targetAst.mesh.position);
+    if(dist>MINE_RANGE||cap<=0){
+      mining=false;
+      if(cap<=0) showNotif('⚠ CAPACITOR DEPLETED — wait for recharge');
+    } else {
+      // Laser start: just ahead of ship nose
+      const lS=shipPos.clone().addScaledVector(fwd,4.8).add(new THREE.Vector3(0,0.3,0));
+      const lE=targetAst.mesh.position.clone();
+      setLaserPoints(laser1,lS,lE); setLaserPoints(laser2,lS,lE);
+      laser1.line.visible=true; laser2.line.visible=true;
+
+      // Animated colour pulse
+      const pulse=0.5+Math.sin(totalT*9)*0.3;
+      laser1.mat.color.setRGB(1,0.55+pulse*0.25,0);
+      laser2.mat.opacity=0.25+pulse*0.35;
+      laserGlow.position.copy(lE);
+      laserGlow.intensity=2.2+Math.sin(totalT*15)*0.9;
+
+      // Cycle
+      mineTimer+=dt;
+      if(mineTimer>=MINE_CYCLE){
+        mineTimer=0;
+        const ore=ORES[targetAst.oreType];
+        const units=ore.yield*(0.72+Math.random()*0.56);
+        const vol=units*ore.vol;
+        if(cargoUsed+vol<=CARGO_MAX){
+          cargoUsed+=vol; manifest[targetAst.oreType]+=units;
+          const dmg=16+Math.random()*14;
+          targetAst.health=Math.max(0,targetAst.health-dmg);
+          // Shrink as depleted
+          targetAst.mesh.scale.setScalar(targetAst.radius*(0.55+(targetAst.health/100)*0.45));
+          spawnParticles(lE,ore.color);
+          if(targetAst.health<=0){
+            targetAst.mesh.visible=false; mining=false;
+            showNotif(`✓ Asteroid fully depleted · ${ore.name} extracted`);
+            targetAst=null;
+          }
+        } else {
+          mining=false; showNotif('⚠ CARGO HOLD FULL · [F] or button to dock and sell');
+        }
+      }
+    }
+  } else if(mining){ mining=false; }
+
+  // ── ASTEROIDS ──
+  for(const ast of asteroids){
+    if(ast.health<=0) continue;
+    ast.mesh.rotation.x+=ast.rotV.x; ast.mesh.rotation.y+=ast.rotV.y; ast.mesh.rotation.z+=ast.rotV.z;
+    ast.mesh.material.emissive.setHex(ast===targetAst?0x221805:ORES[ast.oreType].emissive);
+  }
+
+  // ── PARTICLES ──
+  for(let i=pSystems.length-1;i>=0;i--){
+    const p=pSystems[i]; p.life-=dt;
+    if(p.life<=0){scene.remove(p.pts);pSystems.splice(i,1);continue;}
+    const pa=p.pts.geometry.attributes.position;
+    for(let j=0;j<p.vels.length;j++){
+      pa.setXYZ(j,pa.getX(j)+p.vels[j].x*dt,pa.getY(j)+p.vels[j].y*dt,pa.getZ(j)+p.vels[j].z*dt);
+      p.vels[j].multiplyScalar(0.965);
+    }
+    pa.needsUpdate=true; p.pts.material.opacity=p.life/p.max;
+  }
+
+  // ── CAMERA ──
+  const camTarget=shipPos.clone().addScaledVector(fwd,-32).add(new THREE.Vector3(0,11,0));
+  camCurPos.lerp(camTarget,3.8*dt);
+  camera.position.copy(camCurPos);
+  const lookAt=shipPos.clone().addScaledVector(fwd,9);
+  camLook.lerp(lookAt,5.5*dt); camera.lookAt(camLook);
+
+  // ── STATION ──
+  stGroup.rotation.y+=0.00025;
+  dockLight.intensity=1.3+Math.sin(totalT*1.8)*0.6;
+
+  // ── HUD ──
+  updateHUD(); drawArrow();
+  renderer.render(scene,camera);
+}
+
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+animate(0);
+</script>
+</body>
+</html>
