@@ -8,6 +8,6 @@ all our games
 | Game | Play |
 |------|------|
 | Snake | [▶ Play](https://dailybabel.github.io/arcade/snake.html) |
-
+| Space Invaders | [▶ Play](https://dailybabel.github.io/arcade/spaceinvaders.html) |
 
 ## https://dailybabel.github.io/arcade/snake.html
