@@ -1,251 +1,239 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Infinite Game of Life</title>
+<meta charset="UTF-8">
+<title>Hardcore Game of Life</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-    html, body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: #0b0f14;
-        color: #e0e6ed;
-        font-family: system-ui, sans-serif;
-    }
-
-    canvas {
-        display: block;
-    }
-
-    .ui {
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        background: rgba(20, 25, 32, 0.9);
-        padding: 10px;
-        border-radius: 10px;
-        backdrop-filter: blur(6px);
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-
-    button, input {
-        margin: 3px;
-        padding: 6px 10px;
-        border-radius: 6px;
-        border: none;
-        background: #1f2a36;
-        color: #e0e6ed;
-        cursor: pointer;
-    }
-
-    button:hover {
-        background: #2e3c4c;
-    }
+body { margin:0; background:#0b0f14; color:#ddd; font-family:sans-serif; overflow:hidden; }
+canvas { display:block; }
+.ui {
+    position:fixed; top:10px; left:10px;
+    background:rgba(20,25,32,.9);
+    padding:10px; border-radius:10px;
+}
+button, select {
+    margin:2px; padding:5px;
+    background:#1f2a36; color:#ddd;
+    border:none; border-radius:5px;
+}
 </style>
 </head>
 <body>
 
-<canvas id="game"></canvas>
+<canvas id="c"></canvas>
 
 <div class="ui">
-    <button id="start">Start</button>
-    <button id="pause">Pause</button>
-    <button id="step">Step</button>
-    <button id="clear">Clear</button>
-    <br/>
-    <button id="save">Save</button>
-    <input type="file" id="load" />
+<button id="run">Run</button>
+<button id="pause">Pause</button>
+<button id="step">Step</button>
+<button id="clear">Clear</button>
+<br>
+<select id="pattern"></select>
+<button id="stampMode">Stamp: OFF</button>
+<br>
+<button id="save">Save</button>
+<input type="file" id="load">
 </div>
 
 <script>
-const canvas = document.getElementById("game");
+// ===== Canvas =====
+const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 
-let width, height;
-function resize() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
+let W, H;
+function resize(){
+    W = canvas.width = innerWidth;
+    H = canvas.height = innerHeight;
 }
-window.addEventListener("resize", resize);
+addEventListener("resize", resize);
 resize();
 
-// ===== Simulation State =====
-let liveCells = new Set();
+// ===== Fast Encoding =====
+// pack x,y into single int
+function enc(x,y){ return (x<<16) ^ (y & 0xffff); }
+function dec(k){ return [k>>16, (k<<16)>>16]; }
 
-function key(x, y) { return `${x},${y}`; }
-function parse(k) { return k.split(',').map(Number); }
+// ===== State =====
+let live = new Set();
 
-// ===== View Transform =====
-let offsetX = width / 2;
-let offsetY = height / 2;
+// ===== Patterns =====
+const patterns = {
+    "Glider": [[0,0],[1,0],[2,0],[2,1],[1,2]],
+    "LWSS": [[0,1],[0,3],[1,0],[2,0],[3,0],[4,0],[4,3],[1,4],[4,4]],
+    "Pulsar": [
+        [-6,-4],[-6,-3],[-6,-2],[-6,2],[-6,3],[-6,4],
+        [-1,-4],[-1,-3],[-1,-2],[-1,2],[-1,3],[-1,4],
+        [-4,-6],[-3,-6],[-2,-6],[2,-6],[3,-6],[4,-6],
+        [-4,-1],[-3,-1],[-2,-1],[2,-1],[3,-1],[4,-1],
+        [-4,1],[-3,1],[-2,1],[2,1],[3,1],[4,1],
+        [-4,6],[-3,6],[-2,6],[2,6],[3,6],[4,6],
+        [1,-4],[1,-3],[1,-2],[1,2],[1,3],[1,4],
+        [6,-4],[6,-3],[6,-2],[6,2],[6,3],[6,4]
+    ],
+    "Glider Gun": [
+        [0,4],[1,4],[0,5],[1,5],
+        [10,4],[10,5],[10,6],
+        [11,3],[11,7],
+        [12,2],[12,8],
+        [13,2],[13,8],
+        [14,5],
+        [15,3],[15,7],
+        [16,4],[16,5],[16,6],
+        [17,5],
+        [20,2],[20,3],[20,4],
+        [21,2],[21,3],[21,4],
+        [22,1],[22,5],
+        [24,0],[24,1],[24,5],[24,6],
+        [34,2],[34,3],[35,2],[35,3]
+    ]
+};
+
+// populate dropdown
+const patternSelect = document.getElementById("pattern");
+for (let k in patterns) {
+    let opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = k;
+    patternSelect.appendChild(opt);
+}
+
+// ===== View =====
 let scale = 10;
+let offX = W/2;
+let offY = H/2;
 
-// ===== Simulation =====
-function stepSimulation() {
-    const neighborCounts = new Map();
+// ===== Simulation (Optimized) =====
+function step(){
+    const counts = new Map();
 
-    for (let k of liveCells) {
-        const [x, y] = parse(k);
+    for (let k of live){
+        let [x,y] = dec(k);
 
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-                if (dx === 0 && dy === 0) continue;
-
-                const nk = key(x + dx, y + dy);
-                neighborCounts.set(nk, (neighborCounts.get(nk) || 0) + 1);
+        for (let dx=-1; dx<=1; dx++){
+            for (let dy=-1; dy<=1; dy++){
+                if (!dx && !dy) continue;
+                let nk = enc(x+dx,y+dy);
+                counts.set(nk,(counts.get(nk)||0)+1);
             }
         }
     }
 
-    const newLive = new Set();
+    let next = new Set();
 
-    for (let [k, count] of neighborCounts) {
-        if (count === 3 || (count === 2 && liveCells.has(k))) {
-            newLive.add(k);
+    for (let [k,c] of counts){
+        if (c===3 || (c===2 && live.has(k))){
+            next.add(k);
         }
     }
 
-    liveCells = newLive;
+    live = next;
 }
 
-// ===== Rendering =====
-function drawGrid() {
-    const gridSize = scale;
-    ctx.strokeStyle = "#16202b";
-    ctx.lineWidth = 1;
+// ===== Render =====
+function draw(){
+    ctx.fillStyle="#0b0f14";
+    ctx.fillRect(0,0,W,H);
 
-    const startX = (-offsetX % gridSize);
-    const startY = (-offsetY % gridSize);
+    ctx.fillStyle="#00ffa6";
 
-    for (let x = startX; x < width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-    }
+    for (let k of live){
+        let [x,y]=dec(k);
+        let sx = x*scale+offX;
+        let sy = y*scale+offY;
 
-    for (let y = startY; y < height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
+        if (sx<-scale||sy<-scale||sx>W||sy>H) continue;
+
+        ctx.fillRect(sx,sy,scale,scale);
     }
 }
 
-function render() {
-    ctx.fillStyle = "#0b0f14";
-    ctx.fillRect(0, 0, width, height);
+// ===== Loop =====
+let running=false;
 
-    drawGrid();
-
-    ctx.fillStyle = "#00ffa6";
-
-    for (let k of liveCells) {
-        const [x, y] = parse(k);
-
-        const sx = x * scale + offsetX;
-        const sy = y * scale + offsetY;
-
-        if (sx < -scale || sy < -scale || sx > width || sy > height) continue;
-
-        ctx.fillRect(sx, sy, scale, scale);
-    }
-}
-
-// ===== Game Loop =====
-let running = false;
-
-function loop() {
-    if (running) {
-        stepSimulation();
-    }
-    render();
+function loop(){
+    if (running) step();
+    draw();
     requestAnimationFrame(loop);
 }
 loop();
 
 // ===== Controls =====
-document.getElementById("start").onclick = () => running = true;
-document.getElementById("pause").onclick = () => running = false;
-document.getElementById("step").onclick = () => {
-    stepSimulation();
-    render();
+run.onclick=()=>running=true;
+pause.onclick=()=>running=false;
+step.onclick=()=>{step(); draw();}
+clear.onclick=()=>live.clear();
+
+// ===== Interaction =====
+let drag=false, lx, ly;
+
+canvas.onmousedown=e=>{
+    drag=true; lx=e.clientX; ly=e.clientY;
 };
-document.getElementById("clear").onclick = () => liveCells.clear();
+canvas.onmouseup=()=>drag=false;
 
-// ===== Mouse Interaction =====
-let dragging = false;
-let lastX, lastY;
-
-canvas.addEventListener("mousedown", (e) => {
-    dragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-});
-
-canvas.addEventListener("mouseup", () => dragging = false);
-canvas.addEventListener("mouseleave", () => dragging = false);
-
-canvas.addEventListener("mousemove", (e) => {
-    if (dragging) {
-        offsetX += e.clientX - lastX;
-        offsetY += e.clientY - lastY;
-        lastX = e.clientX;
-        lastY = e.clientY;
+canvas.onmousemove=e=>{
+    if(drag){
+        offX+=e.clientX-lx;
+        offY+=e.clientY-ly;
+        lx=e.clientX; ly=e.clientY;
     }
-});
+};
 
-canvas.addEventListener("click", (e) => {
-    const x = Math.floor((e.clientX - offsetX) / scale);
-    const y = Math.floor((e.clientY - offsetY) / scale);
+let stampMode=false;
 
-    const k = key(x, y);
-    if (liveCells.has(k)) liveCells.delete(k);
-    else liveCells.add(k);
-});
+stampModeBtn = document.getElementById("stampMode");
+stampModeBtn.onclick=()=>{
+    stampMode=!stampMode;
+    stampModeBtn.textContent="Stamp: "+(stampMode?"ON":"OFF");
+};
+
+canvas.onclick=e=>{
+    let x=Math.floor((e.clientX-offX)/scale);
+    let y=Math.floor((e.clientY-offY)/scale);
+
+    if(stampMode){
+        let pat = patterns[patternSelect.value];
+        for (let [dx,dy] of pat){
+            live.add(enc(x+dx,y+dy));
+        }
+    } else {
+        let k=enc(x,y);
+        if(live.has(k)) live.delete(k);
+        else live.add(k);
+    }
+};
 
 // ===== Zoom =====
-canvas.addEventListener("wheel", (e) => {
+canvas.onwheel=e=>{
     e.preventDefault();
+    let z = e.deltaY<0?1.1:0.9;
 
-    const zoom = e.deltaY < 0 ? 1.1 : 0.9;
+    offX = e.clientX - (e.clientX-offX)*z;
+    offY = e.clientY - (e.clientY-offY)*z;
 
-    const mx = e.clientX;
-    const my = e.clientY;
+    scale*=z;
+    scale=Math.max(2,Math.min(40,scale));
+};
 
-    offsetX = mx - (mx - offsetX) * zoom;
-    offsetY = my - (my - offsetY) * zoom;
-
-    scale *= zoom;
-    scale = Math.max(2, Math.min(50, scale));
-});
-
-// ===== Save =====
-document.getElementById("save").onclick = () => {
-    const data = {
-        cells: Array.from(liveCells)
-    };
-
-    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "life.json";
+// ===== Save/Load =====
+save.onclick=()=>{
+    let arr=[...live];
+    let blob=new Blob([JSON.stringify(arr)]);
+    let a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="life.json";
     a.click();
 };
 
-// ===== Load =====
-document.getElementById("load").addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-        const data = JSON.parse(reader.result);
-        liveCells = new Set(data.cells || []);
+load.onchange=e=>{
+    let f=e.target.files[0];
+    let r=new FileReader();
+    r.onload=()=>{
+        live=new Set(JSON.parse(r.result));
     };
-    reader.readAsText(file);
-});
+    r.readAsText(f);
+};
 </script>
 
 </body>
