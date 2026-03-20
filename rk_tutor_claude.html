@@ -133,6 +133,46 @@ button.danger:hover{background:rgba(255,82,82,.15);border-color:var(--danger);bo
 .rule-ctrl{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
 .rule-ctrl button{flex:1;min-width:60px;font-size:9px}
 
+/* ── CHALLENGE ── */
+#challenge-select{
+  width:100%;padding:7px 10px;font-size:10px;margin-bottom:10px;
+  background:rgba(0,0,0,.3);border:1px solid var(--border);color:var(--text);
+  font-family:var(--mono);border-radius:3px;outline:none;cursor:pointer;letter-spacing:.5px;
+}
+#challenge-select option,#challenge-select optgroup{background:#0a0a1a}
+#challenge-select:hover{border-color:var(--accent)}
+#challenge-name{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--gold);margin-bottom:5px}
+#challenge-desc{font-size:11px;color:var(--muted);line-height:1.55;margin-bottom:9px}
+#challenge-hint-box{
+  background:rgba(255,183,3,.04);border:1px solid rgba(255,183,3,.15);
+  border-radius:4px;padding:10px;margin-top:6px;
+}
+#challenge-hint-name{
+  font-family:var(--mono);font-size:11px;color:var(--gold);margin-bottom:8px;
+}
+#challenge-step-box{
+  background:rgba(255,183,3,.05);border:1px solid rgba(255,183,3,.18);
+  border-radius:4px;padding:10px;margin-top:8px;
+  display:none;flex-direction:column;gap:8px;
+}
+#challenge-step-info{
+  font-family:var(--mono);font-size:12px;color:var(--gold);text-align:center;
+  padding:4px 0;letter-spacing:1px;
+}
+#challenge-step-progress{
+  display:flex;gap:3px;justify-content:center;flex-wrap:wrap;
+}
+#challenge-step-progress .step-dot{
+  border-color:rgba(255,183,3,.3);
+}
+#challenge-step-progress .step-dot.done{
+  background:rgba(255,183,3,.6);border-color:var(--gold);
+}
+#challenge-step-progress .step-dot.current{
+  background:var(--gold);box-shadow:0 0 6px rgba(255,183,3,.6);
+}
+#btn-next-challenge-step{width:100%;padding:9px;font-size:10px;letter-spacing:1.5px}
+
 /* ── STEP ── */
 #step-box{
   background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.18);
@@ -302,6 +342,31 @@ button.danger:hover{background:rgba(255,82,82,.15);border-color:var(--danger);bo
         </div>
       </div>
 
+      <!-- CHALLENGE MODE -->
+      <div class="sec">
+        <div class="sec-title">CHALLENGE MODE</div>
+        <select id="challenge-select"></select>
+        <div id="challenge-name">—</div>
+        <div id="challenge-desc"></div>
+        <div class="rule-ctrl">
+          <button id="btn-setup-challenge" class="active">⚙ SETUP</button>
+          <button id="btn-reveal-hint">? HINT</button>
+        </div>
+        <div id="challenge-hint-box" style="display:none;margin-top:8px">
+          <div class="moves-label">SUGGESTED RULE</div>
+          <div id="challenge-hint-name" style="font-family:var(--mono);font-size:11px;color:var(--accent);margin-bottom:6px"></div>
+          <div class="rule-ctrl">
+            <button id="btn-play-challenge" class="active">▶ PLAY</button>
+            <button id="btn-step-challenge">STEP</button>
+          </div>
+          <div id="challenge-step-box" class="step-box">
+            <div id="challenge-step-info"></div>
+            <div id="challenge-step-progress"></div>
+            <button id="btn-next-challenge-step">NEXT STEP →</button>
+          </div>
+        </div>
+      </div>
+
       <!-- HISTORY -->
       <div class="sec">
         <div class="sec-title">HISTORY</div>
@@ -378,18 +443,79 @@ const INV = {
 };
 
 const RULES = [
-  {id:'RT',    name:'Right Trigger',       desc:'Core insert: right side. Foundation of most solving steps.',        moves:["R","U","R'"]},
-  {id:'LT',    name:'Left Trigger',        desc:'Core insert: left side. Mirror of the right trigger.',             moves:["L'","U'","L"]},
-  {id:'RT_I',  name:'Right Trigger Inv.',  desc:'Inverse right trigger — used to extract or undo insertions.',      moves:["R","U'","R'"]},
-  {id:'LT_I',  name:'Left Trigger Inv.',   desc:'Inverse left trigger — extracts or undoes left side inserts.',     moves:["L'","U","L"]},
-  {id:'WC_R',  name:'White Corner Right',  desc:'Insert white corner from top layer into the right-hand slot.',    moves:["R","U","R'"]},
-  {id:'WC_L',  name:'White Corner Left',   desc:'Insert white corner from top layer into the left-hand slot.',     moves:["L'","U'","L"]},
-  {id:'ME_R',  name:'Middle Edge Right',   desc:'Slide a top-layer edge piece into the right middle-layer slot.',  moves:["U","R","U'","R'","U'","F'","U","F"]},
-  {id:'ME_L',  name:'Middle Edge Left',    desc:'Slide a top-layer edge piece into the left middle-layer slot.',   moves:["U'","L'","U","L","U","F","U'","F'"]},
-  {id:'YX',    name:'Yellow Cross',        desc:'Orient the four U-face edge pieces to show yellow on top.',       moves:["F","R","U","R'","U'","F'"]},
-  {id:'YF',    name:'Yellow Face',         desc:'Orient all yellow corners to complete the full yellow face.',     moves:["R","U","R'","U","R","U2","R'"]},
-  {id:'CS',    name:'Corner Swap',         desc:'Permute the U-face corners into their correct positions.',        moves:["U","R","U'","L'","U","R'","U'","L"]},
-  {id:'EC',    name:'Edge Cycle',          desc:'Cycle the last-layer edges to complete the solve.',               moves:["R","U","R'","U","R","U2","R'","U"]},
+  // --- LAYER 2 ---
+  {id:'RT',    section:'Layer 1', name:'Right Trigger',       desc:'Core insert: right side. Foundation of most solving steps.',      moves:["R","U","R'"]},
+  {id:'LT',    section:'Layer 1', name:'Left Trigger',        desc:'Core insert: left side. Mirror of the right trigger.',            moves:["L'","U'","L"]},
+  {id:'RT_I',  section:'Layer 1', name:'Right Trigger Inv.',  desc:'Inverse right trigger — used to extract or undo insertions.',     moves:["R","U'","R'"]},
+  {id:'LT_I',  section:'Layer 1', name:'Left Trigger Inv.',   desc:'Inverse left trigger — extracts or undoes left side inserts.',    moves:["L'","U","L"]},
+  {id:'WC_R',  section:'Layer 1', name:'White Corner Right',  desc:'Insert white corner from top layer into the right-hand slot.',    moves:["R","U","R'"]},
+  {id:'WC_L',  section:'Layer 1', name:'White Corner Left',   desc:'Insert white corner from top layer into the left-hand slot.',     moves:["L'","U'","L"]},
+  // --- LAYER 2 ---
+  {id:'ME_R',  section:'Layer 2', name:'Middle Edge Right',   desc:'Slide a top-layer edge piece into the right middle-layer slot.',  moves:["U","R","U'","R'","U'","F'","U","F"]},
+  {id:'ME_L',  section:'Layer 2', name:'Middle Edge Left',    desc:'Slide a top-layer edge piece into the left middle-layer slot.',   moves:["U'","L'","U","L","U","F","U'","F'"]},
+  // --- LAYER 3 ---
+  {id:'YX',    section:'Layer 3', name:'Yellow Cross',        desc:'Orient the four U-face edge pieces to show yellow on top.',       moves:["F","R","U","R'","U'","F'"]},
+  {id:'YF',    section:'Layer 3', name:'Yellow Face',         desc:'Orient all yellow corners to complete the full yellow face.',     moves:["R","U","R'","U","R","U2","R'"]},
+  {id:'CS',    section:'Layer 3', name:'Corner Swap',         desc:'Permute the U-face corners into their correct positions.',        moves:["U","R","U'","L'","U","R'","U'","L"]},
+  {id:'EC',    section:'Layer 3', name:'Edge Cycle',          desc:'Cycle the last-layer edges to complete the solve.',               moves:["R","U","R'","U","R","U2","R'","U"]},
+  {id:'CT',    section:'Layer 3', name:'RFU Corner Twist',    desc:'Repeat 2 or 4 times to twist the RFU cubie CW or CCW.',           moves:["R'","D'","R","D"]},
+];
+
+const CHALLENGES = [
+  {
+    id:'CH1',
+    section:'Layer 1',
+    name:'Insert Right Corner',
+    desc:'A white corner is in the top layer above its slot. Insert it into the bottom-right position.',
+    camera: 'angle',
+    setup:["U","F","U'","F'","U'"],
+    hint:['RT'],
+  },
+  {
+    id:'CH2',
+    section:'Layer 1',
+    name:'Insert Left Corner',
+    desc:'A white corner is in the top layer above its slot. Insert it into the bottom-left position.',
+    camera: 'angle',
+    setup:["U'","F'","U","F","U"],
+    hint:['LT'],
+  },
+  {
+    id:'CH3',
+    section:'Layer 2',
+    name:'Slot the Right Edge (unverified)',
+    desc:'A middle-layer edge is sitting in the top layer. Slide it into the right slot without disturbing the bottom.',
+    camera: 'bot',
+    setup:["U'","L'","U","L","U","F","U'","F'","U2"],
+    hint:['ME_R'],
+  },
+  {
+    id:'CH4',
+    section:'Layer 2',
+    name:'Slot the Left Edge (unverified)',
+    desc:'A middle-layer edge is sitting in the top layer. Slide it into the left slot without disturbing the bottom.',
+    camera: 'bot',
+    setup:["U","R","U'","R'","U'","F'","U","F","U2"],
+    hint:['ME_L'],
+  },
+  {
+    id:'CH5',
+    section:'Layer 3',
+    name:'Form the Yellow Cross (unverified)',
+    desc:'Yellow edges are scattered. Orient them so all four face upward to form a cross.',
+    camera: 'angle',
+    setup:["F","U","R","U'","R'","F'","U2","R","U","R'"],
+    hint:['YX'],
+  },
+  {
+    id:'CH6',
+    section:'Layer 3',
+    name:'Complete the Yellow Face (unverified)',
+    desc:'The yellow cross is done but corners face the wrong way. Flip all four corners to complete the yellow face.',
+    camera: 'angle',
+    setup:["R","U","R'","U","R","U2","R'","U","R","U'","R'"],
+    hint:['YF'],
+  },
 ];
 
 // ══════════════════════════════════════════════
@@ -825,6 +951,13 @@ class App {
     this.stepMvs = [];
     this.stepI = 0;
     this.autoTimer = null;
+
+    // challenges
+    this.challengeIdx = 0;
+    this.challengeStepMode = false;
+    this.challengeStepMvs = [];
+    this.challengeStepI = 0;
+    this.hintVisible = false;
     this._init();
   }
 
@@ -833,20 +966,30 @@ class App {
     this.renderer = new CubeRenderer(wrap, this.engine);
     this.queue = new MoveQueue(this.renderer, this.engine, mv=>this._onMove(mv));
     this._buildRuleSelect();
+    this._buildChallengeSelect();
     this._wire();
     this._updateRule();
+    this._updateChallenge();
     this._updateStatus();
     this._updateHistory();
   }
 
-  _buildRuleSelect() {
-    const sel = document.getElementById('rule-select');
-    RULES.forEach((r,i)=>{
+_buildRuleSelect() {
+  const sel = document.getElementById('rule-select');
+  const sections = [...new Set(RULES.map(r=>r.section))];
+  sections.forEach(sec => {
+    const grp = document.createElement('optgroup');
+    grp.label = sec;
+    RULES.forEach((r,i) => {
+      if (r.section !== sec) return;
       const o = document.createElement('option');
-      o.value=i; o.textContent=`${String(i+1).padStart(2,'0')}. ${r.name}`;
-      sel.appendChild(o);
+      o.value = i;
+      o.textContent = r.name;
+      grp.appendChild(o);
     });
-  }
+    sel.appendChild(grp);
+  });
+}
 
   _wire() {
     document.getElementById('btn-scramble').onclick = ()=>this.scramble();
@@ -865,6 +1008,19 @@ class App {
       this._updateRule();
       if(this.stepMode) this._enterStep();
     };
+    // CHALLENGES
+    document.getElementById('challenge-select').onchange = e => {
+      this.challengeIdx = +e.target.value;
+      this.hintVisible = false;
+      document.getElementById('challenge-hint-box').style.display='none';
+      this._updateChallenge();
+    };
+    document.getElementById('btn-setup-challenge').onclick = () => this.setupChallenge();
+    document.getElementById('btn-reveal-hint').onclick    = () => this.revealHint();
+    document.getElementById('btn-play-challenge').onclick  = () => this.playChallenge();
+    document.getElementById('btn-step-challenge').onclick  = () => this.toggleChallengeStep();
+    document.getElementById('btn-next-challenge-step').onclick = () => this.nextChallengeStep();
+
     document.getElementById('speed-select').onchange = e=>{
       this.queue.setMs(+e.target.value);
     };
@@ -1086,6 +1242,107 @@ class App {
       else cls='style="color:var(--text)"';
       return `<span ${cls}>${m}</span>`;
     }).join(' ');
+  }
+
+  // CHALLENGES
+  _buildChallengeSelect() {
+    const sel = document.getElementById('challenge-select');
+    const sections = [...new Set(CHALLENGES.map(c=>c.section))];
+    sections.forEach(sec => {
+      const grp = document.createElement('optgroup');
+      grp.label = sec;
+      CHALLENGES.forEach((c,i) => {
+        if (c.section !== sec) return;
+        const o = document.createElement('option');
+        o.value = i; o.textContent = c.name;
+        grp.appendChild(o);
+      });
+      sel.appendChild(grp);
+    });
+  }
+
+  _updateChallenge() {
+    const c = CHALLENGES[this.challengeIdx];
+    document.getElementById('challenge-name').textContent = c.name;
+    document.getElementById('challenge-desc').textContent = c.desc;
+  }
+
+  setupChallenge() {
+    if (this.queue.busy) return;
+    this._hardReset();
+    this.hintVisible = false;
+    document.getElementById('challenge-hint-box').style.display='none';
+    const c = CHALLENGES[this.challengeIdx];
+    this.renderer.snapCamera(c.camera);  // ← ensure known orientation
+    const mvs = c.setup;
+    this.queue.pushAll(mvs.map(m => this._resolveMove(m)));
+  }
+
+  revealHint() {
+    const c = CHALLENGES[this.challengeIdx];
+    const rule = RULES.find(r => r.id === c.hint[0]);
+    document.getElementById('challenge-hint-name').textContent = rule ? rule.name : c.hint.join(', ');
+    document.getElementById('challenge-hint-box').style.display='block';
+    document.getElementById('challenge-step-box').style.display='none';
+  }
+
+  playChallenge() {
+    if (this.queue.busy) return;
+    const c = CHALLENGES[this.challengeIdx];
+    const rule = RULES.find(r => r.id === c.hint[0]);
+    if (!rule) return;
+    const resolved = rule.moves.map(m=>this._resolveMove(m));
+    resolved.forEach(m=>this.history.push({world:m, label:this._getColorLabel(m)}));
+    this.redo=[];
+    this.queue.pushAll(resolved);
+    this._updateHistory();
+  }
+
+  toggleChallengeStep() {
+    if (this.challengeStepMode) {
+      this.challengeStepMode = false;
+      document.getElementById('challenge-step-box').style.display='none';
+      document.getElementById('btn-step-challenge').classList.remove('active');
+      document.getElementById('btn-step-challenge').textContent='STEP';
+    } else {
+      const c = CHALLENGES[this.challengeIdx];
+      const rule = RULES.find(r => r.id === c.hint[0]);
+      if (!rule) return;
+      this.challengeStepMode = true;
+      this.challengeStepMvs = [...rule.moves];
+      this.challengeStepI = 0;
+      document.getElementById('challenge-step-box').style.display='flex';
+      document.getElementById('btn-step-challenge').classList.add('active');
+      document.getElementById('btn-step-challenge').textContent='EXIT STEP';
+      this._updateChallengeStepUI();
+    }
+  }
+
+  nextChallengeStep() {
+    if (!this.challengeStepMode || this.challengeStepI >= this.challengeStepMvs.length || this.queue.busy) return;
+    const mv = this._resolveMove(this.challengeStepMvs[this.challengeStepI]);
+    this.challengeStepI++;
+    this.history.push({world:mv, label:this._getColorLabel(mv)});
+    this.redo=[];
+    this.queue.push(mv);
+    this._updateHistory();
+    this._updateChallengeStepUI();
+    if (this.challengeStepI >= this.challengeStepMvs.length) setTimeout(()=>this.toggleChallengeStep(), 600);
+  }
+
+  _updateChallengeStepUI() {
+    const total = this.challengeStepMvs.length;
+    const info = document.getElementById('challenge-step-info');
+    const prog = document.getElementById('challenge-step-progress');
+    info.textContent = this.challengeStepI < total
+      ? `Next: ${this.challengeStepMvs[this.challengeStepI]}  (${this.challengeStepI+1}/${total})`
+      : 'Sequence complete!';
+    prog.innerHTML='';
+    this.challengeStepMvs.forEach((_,i)=>{
+      const d=document.createElement('div');
+      d.className='step-dot'+(i<this.challengeStepI?' done':i===this.challengeStepI?' current':'');
+      prog.appendChild(d);
+    });
   }
 
   _updateStatus() {
